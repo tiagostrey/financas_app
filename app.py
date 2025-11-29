@@ -462,26 +462,58 @@ with aba_patrimonio:
             with c_h2:
                 if not df_hist.empty:
                     df_hist['Data'] = df_hist['data_inicio'].dt.strftime("%d/%m/%Y")
-                    st.dataframe(df_hist[['Data', 'taxa_anual']].sort_values('data_inicio', ascending=False).style.format({"taxa_anual": "{:.2f}"}), height=200, hide_index=True, use_container_width=True)
+                    df_hist_sorted = df_hist.sort_values('data_inicio', ascending=False)
+                    st.dataframe(
+                        df_hist_sorted[['Data', 'taxa_anual']].style.format({"taxa_anual": "{:.2f}"}),
+                        height=200,
+                        hide_index=True,
+                        use_container_width=True
+                    )
 
         st.divider()
         with st.expander("➕ Adicionar Novo Investimento", expanded=False):
-            with st.form("form_inv_pat"):
+            with st.form("form_investimentos"):
+    
                 c1, c2, c3 = st.columns(3)
-                with c1: nom = st.text_input("Nome"); dat = st.date_input("Data", format="DD/MM/YYYY")
-                with c2: val = st.number_input("Valor", 0.0, step=100.0, format="%.2f"); st.text_input("Dono", st.session_state['usuario_atual'], disabled=True)
-                with c3: 
-                    idx = st.selectbox("Tipo", ["% do CDI", "IPCA +", "Taxa Fixa"])
+
+                with c1:
+                    nom = st.text_input("Nome do investimento")
+                    dat = st.date_input("Data da aplicação", format="DD/MM/YYYY")
+
+                with c2:
+                    inst = st.text_input("Banco / Corretora")
+                    val = st.number_input("Valor aplicado (R$)", 0.0, step=100.0, format="%.2f")
+                    st.text_input("Dono", st.session_state['usuario_atual'], disabled=True)
+
+                with c3:
+                    idx = st.selectbox("Indexador", ["% do CDI", "IPCA +", "Taxa Fixa"])
                     tx = st.number_input("Taxa", 0.0, step=0.5)
-                if st.form_submit_button("Salvar"):
+                    trib = st.selectbox("Tributação", ["Tributado", "Isento"])
+
+                salvar = st.form_submit_button("Salvar")
+
+                if salvar:
                     if val > 0:
                         try:
                             conectar().worksheet("investimentos").append_row([
-                                dat.strftime("%d/%m/%Y"), nom, val, idx, tx, st.session_state['usuario_atual']
+                                dat.strftime("%d/%m/%Y"),
+                                nom,
+                                inst,
+                                val,
+                                idx,
+                                tx,
+                                trib,
+                                st.session_state['usuario_atual']
                             ])
-                            st.success("Cadastrado!"); st.cache_data.clear(); st.rerun()
-                        except: st.error("Erro.")
-                    else: st.warning("Valor zerado.")
+                            st.success("Cadastrado!")
+                            st.cache_data.clear()
+                            st.rerun()
+                        except:
+                            st.error("Erro no salvamento.")
+                    else:
+                        st.warning("Valor zerado.")
+
+
 
         try:
             p = conectar()
@@ -506,8 +538,40 @@ with aba_patrimonio:
                             txa = calcular_taxa_anual_bruta_simples(r['indexador'], tc, cdi_estimado, ipca_estimado)
                             va = vi * ((1 + txa)**(dias/365))
                         
-                        luc = va - vi
-                        res.append({"Nome": r['nome'], "Data": r['data_compra'], "Valor Investido": vi, "Valor Hoje": va, "Lucro": luc, "Rent.": f"{(luc/vi)*100:.2f}%"})
+                        dias = (datetime.now() - dt).days
+
+                        lucro_bruto = va - vi
+
+                        # IR
+                        if str(r.get("tributacao", "Tributado")).lower() == "tributado":
+                            # tabela regressiva
+                            if dias <= 180:
+                                ir = 0.225
+                            elif dias <= 360:
+                                ir = 0.20
+                            elif dias <= 720:
+                                ir = 0.175
+                            else:
+                                ir = 0.15
+                            imposto = lucro_bruto * ir
+                        else:
+                            imposto = 0
+
+                        lucro_liquido = lucro_bruto - imposto
+
+                        res.append({
+                            "Nome": r['nome'],
+                            "Instituição": r['instituicao'],
+                            "Data": r['data_compra'],
+                            "Valor Investido": vi,
+                            "Valor Hoje": va - imposto,  # valor líquido
+                            "Lucro Líquido": lucro_liquido,
+                            "IR Pago": imposto,
+                            "Rent. Líquida": f"{(lucro_liquido/vi)*100:.2f}%"
+                        })
+
+                        ti += vi
+                        ta += (va - imposto)
                         ti += vi; ta += va
                     
                     k1, k2, k3 = st.columns(3)
