@@ -1,0 +1,6 @@
+token.json
+credentials.json
+segredos.py
+__pycache__/
+.env
+*.log
