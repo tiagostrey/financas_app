@@ -266,7 +266,7 @@ with aba_calculadora:
             k5.metric("Lucro Líquido", formatar_real(lucro - ir))
             k6.write("")  # Espaço vazio para manter a simetria
 
-            st.line_chart(df_calc, x="Mês", y=["Total Bruto", "Investido"], color=["#00FF00", "#FF4B4B"])
+            st.line_chart(df_calc, x="Mês", y=["Total Bruto"], color=["#00FF00"])
 
 # --- ABA 3: METAS ---
 with aba_meta:
