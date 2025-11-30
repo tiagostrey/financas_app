@@ -391,8 +391,21 @@ with aba_compras:
             win = "À VISTA" if sv > sp else "A PRAZO"
             st.success(f"🏆 VENCEDOR: **{win}**")
             st.markdown(f"### Saldo: :green[{formatar_real(max(sv, sp))}]")
-            st.info(f"Vantagem: **{formatar_real(dif)}**")
-            st.caption(f"Desconto considerado: {c['perc']:.2f}%")
+
+            # Identificar perdedor
+            if sv > sp:
+                perdedor = "A PRAZO"
+                saldo_perdedor = sp
+            else:
+                perdedor = "À VISTA"
+                saldo_perdedor = sv
+
+            # Quadro azul CLEAN (três blocos, linha em branco entre eles)
+            st.info(
+                f"Vantagem: {formatar_real(dif)}\n\n"
+                f"Saldo no cenário {perdedor}: {formatar_real(saldo_perdedor)}\n\n"
+                f"Desconto considerado: {c['perc']:.2f}%"
+            )
         with cg:
             cor_v, cor_p = ("#00FF00", "#FF4B4B") if sv > sp else ("#FF4B4B", "#00FF00")
             st.line_chart(pd.DataFrame({"Mês": m, "À Vista": lv, "A Prazo": lp}).set_index("Mês"), color=[cor_v, cor_p])
