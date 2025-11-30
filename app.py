@@ -596,13 +596,26 @@ with aba_patrimonio:
 
                         ti += vi
                         ta += (va - imposto)
-                        ti += vi; ta += va
                     
                     k1, k2, k3 = st.columns(3)
-                    k1.metric("Patrimônio", formatar_real(ta))
+                    k1.metric("Patrimônio aproximado", formatar_real(ta))
                     k2.metric("Investido", formatar_real(ti))
-                    k3.metric("Lucro", formatar_real(ta-ti), delta=f"{((ta/ti)-1)*100:.1f}%" if ti>0 else "0%")
-                    st.dataframe(pd.DataFrame(res).style.format({"Valor Investido": "R$ {:,.2f}", "Valor Hoje": "R$ {:,.2f}", "Lucro": "R$ {:,.2f}"}), use_container_width=True, hide_index=True)
+                    k3.metric("Lucro aproximado", formatar_real(ta-ti), delta=f"{((ta/ti)-1)*100:.1f}%" if ti>0 else "0%")
+                    
+                    st.dataframe(
+                        pd.DataFrame(res).style
+                        .format({
+                            "Valor Investido": "R$ {:,.2f}", 
+                            "Valor Hoje": "R$ {:,.2f}", 
+                            "Lucro Líquido": "R$ {:,.2f}", # Nova formatação
+                            "IR Pago": "R$ {:,.2f}"        # Nova formatação
+                        })
+                        .set_properties(**{'text-align': 'center'}) # Centraliza Células
+                        .set_table_styles([dict(selector='th', props=[('text-align', 'center')])]), # Centraliza Cabeçalho
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                    
                 else: st.info("Nenhum investimento seu.")
         except: st.warning("Sem dados.")
 
