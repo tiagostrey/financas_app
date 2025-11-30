@@ -251,10 +251,21 @@ with aba_calculadora:
             lucro = final_bruto - df_calc.iloc[-1]["Investido"]
             ir = 0 if d['trib'] == "Isento" else lucro * calcular_aliquota_ir(d['m']*30)
             
+            final_liquido = final_bruto - ir
+            investido_total = investido
+
+            # Linha 1: Bruto / IR / Líquido
             k1, k2, k3 = st.columns(3)
-            k1.metric("💰 Valor Líquido Final", formatar_real(final_bruto - ir))
-            k2.metric("Total Investido", formatar_real(investido))
-            k3.metric("Lucro Líquido", formatar_real(lucro - ir))
+            k1.metric("💰 Valor Bruto Final", formatar_real(final_bruto))
+            k2.metric("IR a Pagar", formatar_real(ir))
+            k3.metric("Valor Líquido Final", formatar_real(final_liquido))
+
+            # Linha 2: Investido / Lucro / Vazio
+            k4, k5, k6 = st.columns(3)
+            k4.metric("Total Investido", formatar_real(investido_total))
+            k5.metric("Lucro Líquido", formatar_real(lucro - ir))
+            k6.write("")  # Espaço vazio para manter a simetria
+
             st.line_chart(df_calc, x="Mês", y=["Total Bruto", "Investido"], color=["#00FF00", "#FF4B4B"])
 
 # --- ABA 3: METAS ---
