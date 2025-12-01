@@ -464,37 +464,6 @@ with aba_patrimonio:
                 st.cache_data.clear()
                 st.rerun()
         
-        with st.expander("⚙️ Gerenciar Histórico Selic", expanded=False):
-            c_h1, c_h2 = st.columns([2, 1])
-            df_hist = get_historico_selic_df()
-            def_data = datetime.now(); def_tx = 11.25
-            if not df_hist.empty:
-                ult = df_hist.sort_values('data_inicio', ascending=False).iloc[0]
-                def_data = ult['data_inicio']; def_tx = float(ult['taxa_anual'])
-            with c_h1:
-                st.info("Cadastre aqui as taxas Selic que ainda não estão no histórico.")
-                data_selic = st.date_input("Data da Mudança da Taxa", value=def_data, key="hist_data")
-                taxa_selic_hist = st.number_input("Nova Taxa Selic Anual (%)", value=def_tx, step=0.25, format="%.2f", key="hist_taxa")
-                if st.button("💾 Salvar no Histórico"):
-                    try:
-                        p = conectar()
-                        p.worksheet("historico_selic").append_row([data_selic.strftime("%d/%m/%Y"), taxa_selic_hist])
-                        st.success("Salvo!")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except: st.error("Erro.")
-            with c_h2:
-                if not df_hist.empty:
-                    df_hist['Data'] = df_hist['data_inicio'].dt.strftime("%d/%m/%Y")
-                    df_hist_sorted = df_hist.sort_values('data_inicio', ascending=False)
-                    st.dataframe(
-                        df_hist_sorted[['Data', 'taxa_anual']].style.format({"taxa_anual": "{:.2f}"}),
-                        height=200,
-                        hide_index=True,
-                        use_container_width=True
-                    )
-
-        st.divider()
         with st.expander("➕ Adicionar Novo Investimento", expanded=False):
             with st.form("form_investimentos"):
     
@@ -536,9 +505,36 @@ with aba_patrimonio:
                             st.error("Erro no salvamento.")
                     else:
                         st.warning("Valor zerado.")
-
-
-
+        with st.expander("⚙️ Gerenciar Histórico Selic", expanded=False):
+            c_h1, c_h2 = st.columns([2, 1])
+            df_hist = get_historico_selic_df()
+            def_data = datetime.now(); def_tx = 11.25
+            if not df_hist.empty:
+                ult = df_hist.sort_values('data_inicio', ascending=False).iloc[0]
+                def_data = ult['data_inicio']; def_tx = float(ult['taxa_anual'])
+            with c_h1:
+                st.info("Cadastre aqui as taxas Selic que ainda não estão no histórico.")
+                data_selic = st.date_input("Data da Mudança da Taxa", value=def_data, key="hist_data")
+                taxa_selic_hist = st.number_input("Nova Taxa Selic Anual (%)", value=def_tx, step=0.25, format="%.2f", key="hist_taxa")
+                if st.button("💾 Salvar no Histórico"):
+                    try:
+                        p = conectar()
+                        p.worksheet("historico_selic").append_row([data_selic.strftime("%d/%m/%Y"), taxa_selic_hist])
+                        st.success("Salvo!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except: st.error("Erro.")
+            with c_h2:
+                if not df_hist.empty:
+                    df_hist['Data'] = df_hist['data_inicio'].dt.strftime("%d/%m/%Y")
+                    df_hist_sorted = df_hist.sort_values('data_inicio', ascending=False)
+                    st.dataframe(
+                        df_hist_sorted[['Data', 'taxa_anual']].style.format({"taxa_anual": "{:.2f}"}),
+                        height=200,
+                        hide_index=True,
+                        use_container_width=True
+                    )
+        
         try:
             p = conectar()
             if p:
@@ -549,7 +545,11 @@ with aba_patrimonio:
                 if not df_i.empty:
                     df_s = get_historico_selic_df()
                     res = []
-                    ti = 0; ta = 0
+                    ti = 0                # total investido
+                    total_bruto = 0       # valor antes do IR
+                    total_liquido = 0     # valor após IR
+                    total_ir = 0          # IR total
+
                     for _, r in df_i.iterrows():
                         try: dt = datetime.strptime(str(r['data_compra']), "%d/%m/%Y")
                         except: continue
@@ -583,6 +583,12 @@ with aba_patrimonio:
 
                         lucro_liquido = lucro_bruto - imposto
 
+                        # ACUMULADORES ATUALIZADOS
+                        ti += vi
+                        total_bruto += va
+                        total_liquido += (va - imposto)
+                        total_ir += imposto
+
                         res.append({
                             "Nome": r['nome'],
                             "Instituição": r['instituicao'],
@@ -594,14 +600,17 @@ with aba_patrimonio:
                             "Rent. Líquida": f"{(lucro_liquido/vi)*100:.2f}%"
                         })
 
-                        ti += vi
-                        ta += (va - imposto)
-                    
                     k1, k2, k3 = st.columns(3)
-                    k1.metric("Patrimônio aproximado", formatar_real(ta))
-                    k2.metric("Investido", formatar_real(ti))
-                    k3.metric("Lucro aproximado", formatar_real(ta-ti), delta=f"{((ta/ti)-1)*100:.1f}%" if ti>0 else "0%")
-                    
+                    k1.metric("Patrimônio bruto aproximado", formatar_real(total_bruto))
+                    k2.metric("IR a Pagar", formatar_real(total_ir))
+                    k3.metric("Patrimônio líquido aproximado", formatar_real(total_liquido))
+
+                    k4, k5, k6 = st.columns(3)
+                    k4.metric("Investido", formatar_real(ti))
+                    k5.metric("Lucro aproximado", formatar_real(total_liquido - ti),
+                              delta=f"{((total_liquido/ti)-1)*100:.1f}%" if ti>0 else "0%")
+                    k6.write("")
+
                     st.dataframe(
                         pd.DataFrame(res).style
                         .format({
