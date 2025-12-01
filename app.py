@@ -211,7 +211,7 @@ with aba_calculadora:
             meses_input = st.number_input("Prazo (Meses)", value=0, step=1, min_value=0, key="calc_meses")
         with c2:
             st.markdown("#### 2. Rentabilidade")
-            tipo_trib = st.selectbox("Produto", ["Tributado", "Isento"], key="calc_prod_type")
+            tipo_trib = st.selectbox("Produto", ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"], key="calc_prod_type")
             tipo_rent = st.selectbox("Indexador", ["% do CDI", "IPCA +", "Taxa Fixa (Pré)"], key="calc_rent_type")
             
             # CORREÇÃO AQUI (value explícito)
@@ -249,7 +249,7 @@ with aba_calculadora:
         if not df_calc.empty:
             final_bruto = df_calc.iloc[-1]["Total Bruto"]
             lucro = final_bruto - df_calc.iloc[-1]["Investido"]
-            ir = 0 if d['trib'] == "Isento" else lucro * calcular_aliquota_ir(d['m']*30)
+            ir = 0 if "Isento" in d['trib'] else lucro * calcular_aliquota_ir(d['m']*30)
             
             final_liquido = final_bruto - ir
             investido_total = investido
@@ -281,7 +281,7 @@ with aba_meta:
             meta_anos = st.number_input("Em quantos anos?", value=0, step=1, min_value=0, key="meta_anos_val")
         with c2:
             st.markdown("#### 2. Onde investir?")
-            meta_trib = st.selectbox("Produto", ["Tributado", "Isento"], key="meta_trib_sel")
+            meta_trib = st.selectbox("Produto", ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"], key="meta_trib_sel")
             meta_idx = st.selectbox("Indexador", ["% do CDI", "IPCA +", "Taxa Fixa"], key="meta_idx_sel")
             
             # CORREÇÃO AQUI: value=0.0
@@ -305,7 +305,7 @@ with aba_meta:
         st.divider()
         if meta_obj > meta_ini and meta_anos > 0:
             taxa_b = calcular_taxa_anual_bruta(meta_idx, meta_taxa, cdi_estimado, ipca_estimado)
-            ir = 0 if meta_trib == "Isento" else calcular_aliquota_ir(meta_anos*360)
+            ir = 0 if "Isento" in meta_trib else calcular_aliquota_ir(meta_anos*360)
             taxa_liq = taxa_b * (1 - ir)
             i_mes = ((1 + taxa_liq) ** (1/12)) - 1
             
@@ -470,18 +470,18 @@ with aba_patrimonio:
                 c1, c2, c3 = st.columns(3)
 
                 with c1:
-                    nom = st.text_input("Nome do investimento")
+                    st.text_input("Dono", st.session_state['usuario_atual'], disabled=True)
                     dat = st.date_input("Data da aplicação", format="DD/MM/YYYY")
 
                 with c2:
+                    nom = st.text_input("Nome do investimento")
                     inst = st.text_input("Banco / Corretora")
                     val = st.number_input("Valor aplicado (R$)", 0.0, step=100.0, format="%.2f")
-                    st.text_input("Dono", st.session_state['usuario_atual'], disabled=True)
 
                 with c3:
+                    trib = st.selectbox("Produto", ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"])
                     idx = st.selectbox("Indexador", ["% do CDI", "IPCA +", "Taxa Fixa"])
                     tx = st.number_input("Taxa", 0.0, step=0.5)
-                    trib = st.selectbox("Tributação", ["Tributado", "Isento"])
 
                 salvar = st.form_submit_button("Salvar")
 
@@ -566,21 +566,11 @@ with aba_patrimonio:
 
                         lucro_bruto = va - vi
 
-                        # IR
-                        if str(r.get("tributacao", "Tributado")).lower() == "tributado":
-                            # tabela regressiva
-                            if dias <= 180:
-                                ir = 0.225
-                            elif dias <= 360:
-                                ir = 0.20
-                            elif dias <= 720:
-                                ir = 0.175
-                            else:
-                                ir = 0.15
-                            imposto = lucro_bruto * ir
+                        if "Isento" in str(r.get("tributacao", "")):
+                            imposto = 0.0
                         else:
-                            imposto = 0
-
+                            imposto = lucro_bruto * calcular_aliquota_ir(dias)
+                        
                         lucro_liquido = lucro_bruto - imposto
 
                         # ACUMULADORES ATUALIZADOS
