@@ -612,15 +612,48 @@ with aba_patrimonio:
                         .format({
                             "Valor Investido": "R$ {:,.2f}", 
                             "Valor Hoje": "R$ {:,.2f}", 
-                            "Lucro Líquido": "R$ {:,.2f}", # Nova formatação
-                            "IR Pago": "R$ {:,.2f}"        # Nova formatação
+                            "Lucro Líquido": "R$ {:,.2f}", 
+                            "IR Pago": "R$ {:,.2f}"
                         })
-                        .set_properties(**{'text-align': 'center'}) # Centraliza Células
-                        .set_table_styles([dict(selector='th', props=[('text-align', 'center')])]), # Centraliza Cabeçalho
+                        .set_properties(**{'text-align': 'center'}) 
+                        .set_table_styles([dict(selector='th', props=[('text-align', 'center')])]), 
                         use_container_width=True, 
                         hide_index=True
                     )
                     
+                    st.divider()
+                    
+                    # --- ÁREA DE GESTÃO (VISUAL) ---
+                    with st.expander("📝 Gerenciar Investimentos Cadastrados", expanded=False):
+                        # Lista simples para o selectbox (Nome do investimento)
+                        opcoes = ["Selecione..."] + [f"{r['Nome']} - {r['Data']}" for r in res]
+                        
+                        item_selecionado = st.selectbox("Selecione o investimento:", opcoes)
+                        
+                        # Layout em 4 colunas conforme solicitado
+                        c_vazio1, c_edit, c_del, c_vazio2 = st.columns(4)
+                        
+                        with c_edit:
+                            if st.button("✏️ Editar", use_container_width=True):
+                                if item_selecionado == "Selecione...":
+                                    st.warning("Selecione um item!")
+                                else:
+                                    st.info(f"Editar: {item_selecionado}")
+                        
+                        with c_del:
+                            if st.button("🗑️ Excluir", type="primary", use_container_width=True):
+                                if item_selecionado == "Selecione...":
+                                    st.warning("Selecione um item!")
+                                else:
+                                    st.error(f"Excluir: {item_selecionado}")
+                    
+                    with c_del:
+                        if st.button("🗑️ Excluir", type="primary", use_container_width=True):
+                            if item_selecionado == "Selecione...":
+                                st.warning("Selecione um item!")
+                            else:
+                                st.error(f"Excluir: {item_selecionado}")
+
                 else: st.info("Nenhum investimento seu.")
         except: st.warning("Sem dados.")
 
