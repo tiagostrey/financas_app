@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 from conexao import conectar
 import time
+import uuid # Biblioteca para gerar IDs únicos
 
 # ==================================================
 # 1. CONFIGURAÇÃO GERAL E ESTADO
@@ -488,7 +489,12 @@ with aba_patrimonio:
                 if salvar:
                     if val > 0:
                         try:
+                            # Gera um ID único universal
+                            novo_id = str(uuid.uuid4())
+                            
+                            # Salva respeitando a ordem: ID na primeira coluna
                             conectar().worksheet("investimentos").append_row([
+                                novo_id,
                                 dat.strftime("%d/%m/%Y"),
                                 nom,
                                 inst,
