@@ -568,19 +568,21 @@ with aba_patrimonio:
         # ==============================================================================
         with st.expander("➕ Adicionar Novo Investimento", expanded=False):
             with st.form("form_investimentos"):
-                c1, c2, c3 = st.columns(3)
+                c1, c2 = st.columns(2)
                 with c1:
                     nom = st.text_input("Nome do investimento", key="inv_nome")
                     dat = st.date_input("Data da aplicação", format="DD/MM/YYYY", key="inv_data")
                 with c2:
                     inst = st.text_input("Banco / Corretora", key="inv_inst")
                     val = st.number_input("Valor aplicado (R$)", 0.0, step=100.0, format="%.2f", key="inv_val")
-                    st.text_input("Dono", st.session_state['usuario_atual'], disabled=True)
+                c3, c4, c5 = st.columns(3)
                 with c3:
-                    idx = st.selectbox("Indexador", ["% do CDI", "IPCA +", "Taxa Fixa"], key="inv_idx")
-                    tx = st.number_input("Taxa", 0.0, step=0.5, key="inv_tx")
                     trib = st.selectbox("Tributação", ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"], key="inv_trib")
-                
+                with c4:
+                    idx = st.selectbox("Indexador", ["% do CDI", "IPCA +", "Taxa Fixa"], key="inv_idx")
+                with c5:
+                    tx = st.number_input("Taxa", 0.0, step=0.5, key="inv_tx")
+
                 if st.form_submit_button("Salvar"):
                     if val > 0:
                         try:
@@ -657,43 +659,43 @@ with aba_patrimonio:
                     with st.form("form_editar_investimento"):
                         ce1, ce2 = st.columns(2)
                         with ce1:
-                            ennome = st.text_input("Nome", value=item_dados['nome'])
+                            ennome = st.text_input("Nome do investimento", value=item_dados['nome'])
                             # Tratamento seguro da data
                             try: d_obj = datetime.strptime(str(item_dados['data_compra']), "%d/%m/%Y")
                             except: d_obj = datetime.now()
-                            endata = st.date_input("Data", value=d_obj, format="DD/MM/YYYY")
+                            endata = st.date_input("Data da aplicação", value=d_obj, format="DD/MM/YYYY")
                         
                         with ce2:
-                            eninst = st.text_input("Instituição", value=item_dados.get('instituicao', ''))
+                            eninst = st.text_input("Banco / Corretora", value=item_dados.get('instituicao', ''))
                             # Tratamento seguro do valor
                             val_str = str(item_dados['valor_inicial']).replace("R$","").replace(".","").replace(",",".")
                             try: val_float = float(val_str)
                             except: val_float = 0.0
-                            enval = st.number_input("Valor", value=val_float, step=100.0, format="%.2f")
+                            enval = st.number_input("Valor aplicado (R$)", value=val_float, step=100.0, format="%.2f")
 
                         ce3, ce4, ce5 = st.columns(3)
                         with ce3:
-                            # Tenta encontrar o índice atual, se falhar usa 0
-                            lista_idx = ["% do CDI", "IPCA +", "Taxa Fixa"]
-                            curr_idx = item_dados['indexador']
-                            idx_pos = lista_idx.index(curr_idx) if curr_idx in lista_idx else 0
-                            enidx = st.selectbox("Indexador", lista_idx, index=idx_pos)
-                        
-                        with ce4:
-                            # Tratamento da taxa
-                            try: tx_float = float(str(item_dados['taxa']).replace(",", "."))
-                            except: tx_float = 0.0
-                            entx = st.number_input("Taxa", value=tx_float, step=0.5, format="%.2f")
-                        
-                        with ce5:
                             # Tratamento da tributação
                             lista_trib = ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"]
                             curr_trib = item_dados.get('tributacao', '')
                             # Lógica simples para encontrar qual selecionar
                             idx_trib = 1 if "Isento" in curr_trib else 0
                             entrib = st.selectbox("Tributação", lista_trib, index=idx_trib)
+                        with ce4:
+                            # Tenta encontrar o índice atual, se falhar usa 0
+                            lista_idx = ["% do CDI", "IPCA +", "Taxa Fixa"]
+                            curr_idx = item_dados['indexador']
+                            idx_pos = lista_idx.index(curr_idx) if curr_idx in lista_idx else 0
+                            enidx = st.selectbox("Indexador", lista_idx, index=idx_pos)
+                        with ce5:
+                            # Tratamento da taxa
+                            try: tx_float = float(str(item_dados['taxa']).replace(",", "."))
+                            except: tx_float = 0.0
+                            entx = st.number_input("Taxa", value=tx_float, step=0.5, format="%.2f")
+                        
 
-                        c_save, c_cancel = st.columns([1, 1])
+
+                        c_save, c_cancel, c_vazio_a, c_vazio_b = st.columns([1.5, 1, 2, 2])
                         with c_save:
                             if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                                 try:
