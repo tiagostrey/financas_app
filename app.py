@@ -485,7 +485,6 @@ with aba_patrimonio:
                 if not df_full.empty and "usuario" in df_full.columns:
                     df_user = df_full[df_full["usuario"].astype(str).str.lower() == st.session_state['usuario_atual'].lower()].copy()
                 
-                # Se tiver dados, faz os cálculos
                 if not df_user.empty:
                     ti = 0; ta = 0
                     
@@ -493,15 +492,18 @@ with aba_patrimonio:
                         try: dt = datetime.strptime(str(r['data_compra']), "%d/%m/%Y")
                         except: continue
                         
-                        # Limpeza e conversão
+                        # Limpeza de valores
                         vi = float(str(r['valor_inicial']).replace("R$","").replace(".","").replace(",","."))
                         tc = float(str(r['taxa']).replace(",", "."))
                         
-                        # Define ID
-                        item_id = str(r.get('id_invest', '')) # Atualizado para id_invest conforme sua planilha
+                        # ID
+                        item_id = str(r.get('id_invest', ''))
                         if not item_id: item_id = f"temp_{idx}"
 
-                        # Cálculo do Valor Bruto (VA)
+                        # Recupera Vencimento (Se já existir na planilha, usa. Se não, calcula visualmente)
+                        data_venc_str = str(r.get('data_venc', ''))
+                        
+                        # Cálculos Financeiros
                         if r['indexador'] == "% do CDI": 
                             va = calcular_valor_futuro_dinamico(vi, dt, tc, df_hist, selic_atual)
                         else:
@@ -509,24 +511,20 @@ with aba_patrimonio:
                             txa = calcular_taxa_anual_bruta_simples(r['indexador'], tc, cdi_estimado, ipca_estimado)
                             va = vi * ((1 + txa)**(dias/365))
                         
-                        # Cálculo do Líquido e IR
                         dias_corridos = (datetime.now() - dt).days
                         lucro_bruto = va - vi
-                        imposto = 0.0
                         
-                        # Verifica Isenção
-                        if "Isento" in str(r.get("tributacao", "")):
-                            imposto = 0.0
-                        else:
-                            imposto = lucro_bruto * calcular_aliquota_ir(dias_corridos)
+                        # IR Padronizado
+                        if "Isento" in str(r.get("tributacao", "")): imposto = 0.0
+                        else: imposto = lucro_bruto * calcular_aliquota_ir(dias_corridos)
                         
                         lucro_liq = lucro_bruto - imposto
                         
-                        # Adiciona à lista de resultados
                         res.append({
                             "Nome": r['nome'], 
                             "Instituição": r.get('instituicao', ''), 
-                            "Data": r['data_compra'], 
+                            "Data": r['data_compra'],
+                            "Vencimento": data_venc_str, # Nova Coluna Visual
                             "Valor Investido": vi, 
                             "Valor Hoje": va - imposto, 
                             "Lucro Líquido": lucro_liq, 
@@ -536,7 +534,7 @@ with aba_patrimonio:
                         })
                         ti += vi; ta += (va - imposto)
 
-                    # --- EXIBIÇÃO DO RESUMO (TOPO) ---
+                    # --- EXIBIÇÃO ---
                     k1, k2, k3 = st.columns(3)
                     k1.metric("Patrimônio Líquido Estimado", formatar_real(ta))
                     k2.metric("Total Investido", formatar_real(ti))
@@ -547,213 +545,188 @@ with aba_patrimonio:
                     st.dataframe(
                         df_exibir, 
                         column_config={
-                            "Valor Investido": st.column_config.NumberColumn("Valor Investido", format="R$ %.2f"),
-                            "Valor Hoje": st.column_config.NumberColumn("Valor Hoje", format="R$ %.2f"),
-                            "Lucro Líquido": st.column_config.NumberColumn("Lucro Líquido", format="R$ %.2f"),
-                            "IR Pago": st.column_config.NumberColumn("IR Pago", format="R$ %.2f"),
+                            "Valor Investido": st.column_config.NumberColumn(format="R$ %.2f"),
+                            "Valor Hoje": st.column_config.NumberColumn(format="R$ %.2f"),
+                            "Lucro Líquido": st.column_config.NumberColumn(format="R$ %.2f"),
+                            "IR Pago": st.column_config.NumberColumn(format="R$ %.2f"),
+                            "Vencimento": st.column_config.TextColumn("Vencimento"),
                             "Rent. Líquida": st.column_config.TextColumn("Rent. Líquida")
                         },
                         use_container_width=True, 
                         hide_index=True
                     )
                 else:
-                    st.info("Nenhum investimento cadastrado. Utilize o formulário abaixo para começar.")
+                    st.info("Nenhum investimento cadastrado.")
 
         except Exception as e: st.warning(f"Aguardando conexão... ({e})")
 
         st.divider()
 
         # ==============================================================================
-        # 2. ADICIONAR NOVO INVESTIMENTO (EXPANDER 1)
+        # 2. ADICIONAR NOVO INVESTIMENTO (NOVO LAYOUT E PRAZO)
         # ==============================================================================
         with st.expander("➕ Adicionar Novo Investimento", expanded=False):
             with st.form("form_investimentos"):
+                # Linha 1: Nome | Banco
                 c1, c2 = st.columns(2)
-                with c1:
-                    nom = st.text_input("Nome do investimento", key="inv_nome")
+                with c1: nom = st.text_input("Nome do investimento", key="inv_nome")
+                with c2: inst = st.text_input("Banco / Corretora", key="inv_inst")
+                
+                # Linha 2 (Três Colunas com pares de campos)
+                ce1, ce2, ce3 = st.columns(3)
+                with ce1:
                     dat = st.date_input("Data da aplicação", format="DD/MM/YYYY", key="inv_data")
-                with c2:
-                    inst = st.text_input("Banco / Corretora", key="inv_inst")
-                    val = st.number_input("Valor aplicado (R$)", 0.0, step=100.0, format="%.2f", key="inv_val")
-                c3, c4, c5 = st.columns(3)
-                with c3:
                     trib = st.selectbox("Tributação", ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"], key="inv_trib")
-                with c4:
+                with ce2:
+                    prazo = st.number_input("Prazo (meses)", 0, step=1, key="inv_prazo")
                     idx = st.selectbox("Indexador", ["% do CDI", "IPCA +", "Taxa Fixa"], key="inv_idx")
-                with c5:
+                with ce3:
+                    val = st.number_input("Valor aplicado (R$)", 0.0, step=100.0, format="%.2f", key="inv_val")
                     tx = st.number_input("Taxa", 0.0, step=0.5, key="inv_tx")
 
-                # Layout de Botões (Padronizado 4 colunas)
+                # Botões Padronizados
                 c_vazio1, c_salvar, c_cancelar, c_vazio2 = st.columns(4)
-                
-                with c_salvar:
-                    salvar = st.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
-                
-                with c_cancelar:
-                    # Usamos 'on_click' para limpar o estado ANTES da interface recarregar
-                    # Isso evita o erro de StreamlitAPIException
-                    cancelar = st.form_submit_button("Cancelar", use_container_width=True,
-                        on_click=lambda: st.session_state.update({
-                            "inv_nome": "", 
-                            "inv_inst": "", 
-                            "inv_val": 0.0, 
-                            "inv_tx": 0.0, 
-                            "inv_data": datetime.now()
-                        })
-                    )
+                with c_salvar: salvar = st.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
+                with c_cancelar: cancelar = st.form_submit_button("Cancelar", use_container_width=True, on_click=lambda: st.session_state.update({"inv_nome": "", "inv_inst": "", "inv_val": 0.0, "inv_tx": 0.0, "inv_prazo": 0}))
 
                 if salvar:
                     if val > 0:
                         try:
                             novo_id = str(uuid.uuid4())
+                            # Calcula Vencimento (Data + Prazo Meses)
+                            # Usamos pd.DateOffset para somar meses corretamente
+                            data_vencimento = (pd.to_datetime(dat) + pd.DateOffset(months=int(prazo))).strftime("%d/%m/%Y") if prazo > 0 else ""
+                            
+                            # NOVA ORDEM: id, data, prazo, venc, nome, inst, val, idx, tx, trib, user
                             conectar().worksheet("investimentos").append_row([
                                 novo_id,
-                                dat.strftime("%d/%m/%Y"), nom, inst, val, idx, tx, trib, st.session_state['usuario_atual']
+                                dat.strftime("%d/%m/%Y"),
+                                int(prazo),
+                                data_vencimento,
+                                nom,
+                                inst,
+                                val,
+                                idx,
+                                tx,
+                                trib,
+                                st.session_state['usuario_atual']
                             ])
                             st.success("Cadastrado!")
-                            # Limpa campos usando o session_state direto (aqui pode porque vai dar rerun depois)
-                            for k in ["inv_nome", "inv_inst", "inv_val", "inv_tx"]:
+                            for k in ["inv_nome", "inv_inst", "inv_val", "inv_tx", "inv_prazo"]:
                                 if k in st.session_state: del st.session_state[k]
                             st.cache_data.clear(); st.rerun()
                         except Exception as e: st.error(f"Erro no salvamento: {e}")
                     else: st.warning("Valor zerado.")
                 
-                if cancelar:
-                    st.rerun()
+                if cancelar: st.rerun()
 
         # ==============================================================================
-        # 3. GERENCIAR INVESTIMENTOS (EXPANDER 2)
+        # 3. GERENCIAR INVESTIMENTOS (EDIÇÃO COM PRAZO E VENCIMENTO)
         # ==============================================================================
         with st.expander("📝 Gerenciar Investimentos Cadastrados", expanded=False):
-            # Prepara lista de opções baseada nos dados lidos lá em cima
             opcoes_investimentos = {}
             if res:
                 for r in res:
                     opcoes_investimentos[r['ID_OCULTO']] = f"{r['Nome']} - {r['Data']}"
             
-            inv_selecionado_id = st.selectbox(
-                "Selecione o investimento:", 
-                options=["Selecione..."] + list(opcoes_investimentos.keys()),
-                format_func=lambda x: opcoes_investimentos.get(x, "Selecione...")
-            )
+            inv_selecionado_id = st.selectbox("Selecione:", options=["Selecione..."] + list(opcoes_investimentos.keys()), format_func=lambda x: opcoes_investimentos.get(x, "Selecione..."))
             
-            # Layout de 4 colunas para os botões
             c_vazio1, c_edit, c_del, c_vazio2 = st.columns(4)
-            
-            # --- BOTÃO EDITAR ---
             with c_edit:
                 if st.button("✏️ Editar", use_container_width=True):
-                    if inv_selecionado_id == "Selecione...":
-                        st.warning("Selecione um item!")
-                    else:
-                        # Ativa o modo de edição para este ID
+                    if inv_selecionado_id != "Selecione...":
                         st.session_state['editando_id'] = inv_selecionado_id
                         st.rerun()
-
-            # --- BOTÃO EXCLUIR ---
+                    else: st.warning("Selecione um item!")
+            
             with c_del:
                 with st.popover("🗑️ Excluir", use_container_width=True):
-                    st.write("Tem certeza que deseja excluir?")
+                    st.write("Confirma exclusão?")
                     if st.button("Sim, excluir", type="primary"):
                         if inv_selecionado_id != "Selecione...":
                             try:
-                                # Filtra removendo o ID selecionado (Coluna id_invest)
                                 df_nova = df_full[df_full['id_invest'].astype(str) != inv_selecionado_id]
-                                
                                 aba_inv.clear()
                                 aba_inv.update([df_nova.columns.values.tolist()] + df_nova.astype(str).values.tolist())
-                                
-                                st.success("Excluído!")
-                                time.sleep(1); st.rerun()
+                                st.success("Excluído!"); time.sleep(1); st.rerun()
                             except Exception as ex: st.error(f"Erro: {ex}")
-                        else:
-                            st.error("Nada selecionado.")
 
-            # --- FORMULÁRIO DE EDIÇÃO (Aparece abaixo dos botões se ativado) ---
+            # FORMULÁRIO DE EDIÇÃO
             if st.session_state.get('editando_id') == inv_selecionado_id and inv_selecionado_id != "Selecione...":
                 st.divider()
-                # Pega os dados atuais da linha selecionada
                 try:
                     item_dados = df_user[df_user['id_invest'].astype(str) == inv_selecionado_id].iloc[0]
-                    
                     st.markdown(f"**Editando:** {item_dados['nome']}")
                     
                     with st.form("form_editar_investimento"):
+                        # Linha 1
                         ce1, ce2 = st.columns(2)
-                        with ce1:
-                            ennome = st.text_input("Nome do investimento", value=item_dados['nome'])
-                            # Tratamento seguro da data
+                        with ce1: ennome = st.text_input("Nome", value=item_dados['nome'])
+                        with ce2: eninst = st.text_input("Instituição", value=item_dados.get('instituicao', ''))
+                        
+                        # Linha 2 (Layout Novo)
+                        col_e1, col_e2, col_e3 = st.columns(3)
+                        with col_e1:
                             try: d_obj = datetime.strptime(str(item_dados['data_compra']), "%d/%m/%Y")
                             except: d_obj = datetime.now()
-                            endata = st.date_input("Data da aplicação", value=d_obj, format="DD/MM/YYYY")
-                        
-                        with ce2:
-                            eninst = st.text_input("Banco / Corretora", value=item_dados.get('instituicao', ''))
-                            # Tratamento seguro do valor
-                            val_str = str(item_dados['valor_inicial']).replace("R$","").replace(".","").replace(",",".")
-                            try: val_float = float(val_str)
-                            except: val_float = 0.0
-                            enval = st.number_input("Valor aplicado (R$)", value=val_float, step=100.0, format="%.2f")
-
-                        ce3, ce4, ce5 = st.columns(3)
-                        with ce3:
-                            # Tratamento da tributação
+                            endata = st.date_input("Data", value=d_obj, format="DD/MM/YYYY")
+                            
                             lista_trib = ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"]
                             curr_trib = item_dados.get('tributacao', '')
-                            # Lógica simples para encontrar qual selecionar
                             idx_trib = 1 if "Isento" in curr_trib else 0
                             entrib = st.selectbox("Tributação", lista_trib, index=idx_trib)
-                        with ce4:
-                            # Tenta encontrar o índice atual, se falhar usa 0
+                        
+                        with col_e2:
+                            # Prazo
+                            try: prazo_atual = int(item_dados.get('prazo', 0))
+                            except: prazo_atual = 0
+                            enprazo = st.number_input("Prazo (meses)", value=prazo_atual, step=1)
+
                             lista_idx = ["% do CDI", "IPCA +", "Taxa Fixa"]
                             curr_idx = item_dados['indexador']
                             idx_pos = lista_idx.index(curr_idx) if curr_idx in lista_idx else 0
                             enidx = st.selectbox("Indexador", lista_idx, index=idx_pos)
-                        with ce5:
-                            # Tratamento da taxa
+                        
+                        with col_e3:
+                            val_str = str(item_dados['valor_inicial']).replace("R$","").replace(".","").replace(",",".")
+                            try: val_float = float(val_str)
+                            except: val_float = 0.0
+                            enval = st.number_input("Valor", value=val_float, step=100.0, format="%.2f")
+
                             try: tx_float = float(str(item_dados['taxa']).replace(",", "."))
                             except: tx_float = 0.0
                             entx = st.number_input("Taxa", value=tx_float, step=0.5, format="%.2f")
-                        
 
+                        # Botões
+                        c_v1, c_save, c_canc, c_v2 = st.columns(4)
+                        with c_save: salvar_ed = st.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
+                        with c_canc: cancel_ed = st.form_submit_button("Cancelar", use_container_width=True)
 
-                        c_vazio_ed1, c_save_ed, c_cancel_ed, c_vazio_ed2 = st.columns(4)
-                        
-                        with c_save_ed:
-                            salvar_edicao = st.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
-                        
-                        with c_cancel_ed:
-                            cancelar_edicao = st.form_submit_button("Cancelar", use_container_width=True)
-
-                        if salvar_edicao:
+                        if salvar_ed:
                             try:
-                                # Localiza o índice real no DataFrame COMPLETO (df_full)
                                 idx_geral = df_full[df_full['id_invest'].astype(str) == inv_selecionado_id].index[0]
                                 
-                                # Atualiza os valores
+                                # Recalcula Vencimento
+                                nova_venc = (pd.to_datetime(endata) + pd.DateOffset(months=int(enprazo))).strftime("%d/%m/%Y") if enprazo > 0 else ""
+
+                                # Atualiza colunas (nomes devem bater com cabeçalho da planilha)
                                 df_full.at[idx_geral, 'nome'] = ennome
-                                df_full.at[idx_geral, 'data_compra'] = endata.strftime("%d/%m/%Y")
                                 df_full.at[idx_geral, 'instituicao'] = eninst
+                                df_full.at[idx_geral, 'data_compra'] = endata.strftime("%d/%m/%Y")
+                                df_full.at[idx_geral, 'prazo'] = int(enprazo)
+                                df_full.at[idx_geral, 'data_venc'] = nova_venc
                                 df_full.at[idx_geral, 'valor_inicial'] = enval
                                 df_full.at[idx_geral, 'indexador'] = enidx
                                 df_full.at[idx_geral, 'taxa'] = entx
                                 df_full.at[idx_geral, 'tributacao'] = entrib
                                 
-                                # Grava no Google Sheets
                                 aba_inv.clear()
-                                lista_dados = [df_full.columns.values.tolist()] + df_full.astype(str).values.tolist()
-                                aba_inv.update(lista_dados)
-                                
-                                st.success("Investimento atualizado com sucesso!")
-                                st.session_state['editando_id'] = None 
-                                time.sleep(1)
-                                st.rerun()
-                            except Exception as ex:
-                                st.error(f"Erro ao atualizar: {ex}")
+                                aba_inv.update([df_full.columns.values.tolist()] + df_full.astype(str).values.tolist())
+                                st.success("Atualizado!"); st.session_state['editando_id'] = None; time.sleep(1); st.rerun()
+                            except Exception as ex: st.error(f"Erro: {ex}")
                         
-                        if cancelar_edicao:
-                            st.session_state['editando_id'] = None
-                            st.rerun()
+                        if cancel_ed: st.session_state['editando_id'] = None; st.rerun()
+
                 except Exception as e:
                     st.error(f"Erro ao carregar dados para edição: {e}")
 
