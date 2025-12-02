@@ -10,6 +10,34 @@ def render():
     with c2: 
         if st.button("🔄 Atualizar", key="btn_ext_up"): st.cache_data.clear(); st.rerun()
     
+    # --- TUTORIAL CONTEXTUAL ---
+    with st.expander("🤖 Tutorial: Criar e Configurar Bot do Telegram"):
+        st.markdown("""
+        Se você deseja configurar um novo bot para lançar despesas, siga este passo a passo:
+
+        ### 1. Criar o Robô (No Telegram)
+        1.  Abra o Telegram e busque por **@BotFather**.
+        2.  Clique em **Começar** (ou envie `/start`).
+        3.  Envie o comando: `/newbot`.
+        4.  **Dê um nome:** O BotFather pedirá um nome (Ex: *Finanças da Família*).
+        5.  **Crie um usuário:** Escolha um username único que termine em "bot" (Ex: `FinancasStrey_bot`).
+        6.  🛑 **Copie o TOKEN:** O BotFather enviará um código longo em vermelho. **Guarde esse código.**
+
+        ### 2. Descobrir seu ID Pessoal
+        Para o bot saber que é você quem está mandando as mensagens:
+        1.  Busque por **@userinfobot** no Telegram.
+        2.  Clique em **Começar**.
+        3.  Ele responderá com seu **Id** (um número). **Anote esse número.**
+
+        ### 3. Como Usar
+        Após o administrador configurar o sistema com seu Token e ID:
+        1.  Busque pelo seu bot (aquele que você criou no passo 1).
+        2.  Clique em **Começar**.
+        3.  Envie o gasto no formato: `Valor Item Categoria`.
+            * *Exemplo:* `25.90 Padaria Alimentação`
+            * *Exemplo:* `100.00 Gasolina Transporte`
+        """)
+
     @st.cache_data(ttl=60)
     def load_g(): return pd.DataFrame(conectar().worksheet("registros").get_all_records()) if conectar() else pd.DataFrame()
     

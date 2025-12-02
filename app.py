@@ -3,8 +3,7 @@ import time
 from utils import get_selic_atual_db, verificar_login, criar_usuario
 
 # Importação das Abas (que criaremos a seguir)
-from abas import comparativo, calculadora, metas, compras, investimentos, despesas
-
+from abas import comparativo, calculadora, metas, compras, investimentos, despesas, instrucoes
 # ==================================================
 # CONFIGURAÇÃO GERAL E ESTADO
 # ==================================================
@@ -73,8 +72,8 @@ with st.container():
 
 st.divider()
 
-aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
-    "⚖️ Comparativo", "📈 Simulador", "🎯 Metas", "🛒 Compras", "💰 Meus Investimentos 🔒", "💸 Extrato Despesas 🔒"
+aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
+    "⚖️ Comparativo", "📈 Simulador", "🎯 Metas", "🛒 Compras", "💰 Meus Investimentos 🔒", "💸 Extrato Despesas 🔒", "ℹ️ Ajuda"
 ])
 
 # Chamada dos Módulos
@@ -90,3 +89,6 @@ with aba5:
 with aba6:
     if not st.session_state.get('logado', False): mostrar_tela_login("ext")
     else: despesas.render()
+
+with aba7:
+    instrucoes.render()
