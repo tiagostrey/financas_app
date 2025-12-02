@@ -590,7 +590,17 @@ with aba_patrimonio:
                     salvar = st.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
                 
                 with c_cancelar:
-                    cancelar = st.form_submit_button("Cancelar", use_container_width=True)
+                    # Usamos 'on_click' para limpar o estado ANTES da interface recarregar
+                    # Isso evita o erro de StreamlitAPIException
+                    cancelar = st.form_submit_button("Cancelar", use_container_width=True,
+                        on_click=lambda: st.session_state.update({
+                            "inv_nome": "", 
+                            "inv_inst": "", 
+                            "inv_val": 0.0, 
+                            "inv_tx": 0.0, 
+                            "inv_data": datetime.now()
+                        })
+                    )
 
                 if salvar:
                     if val > 0:
@@ -601,7 +611,7 @@ with aba_patrimonio:
                                 dat.strftime("%d/%m/%Y"), nom, inst, val, idx, tx, trib, st.session_state['usuario_atual']
                             ])
                             st.success("Cadastrado!")
-                            # Limpa campos
+                            # Limpa campos usando o session_state direto (aqui pode porque vai dar rerun depois)
                             for k in ["inv_nome", "inv_inst", "inv_val", "inv_tx"]:
                                 if k in st.session_state: del st.session_state[k]
                             st.cache_data.clear(); st.rerun()
@@ -609,9 +619,6 @@ with aba_patrimonio:
                     else: st.warning("Valor zerado.")
                 
                 if cancelar:
-                    # Limpa campos e recarrega
-                    for k in ["inv_nome", "inv_inst", "inv_val", "inv_tx"]:
-                        if k in st.session_state: del st.session_state[k]
                     st.rerun()
 
         # ==============================================================================
