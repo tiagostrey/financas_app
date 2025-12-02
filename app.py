@@ -141,7 +141,7 @@ val_selic_inicial = get_selic_atual_db()
 
 with st.container():
     col1, col2, col3 = st.columns(3)
-    with col1: selic_atual = st.number_input("Taxa Selic (%)", value=val_selic_inicial, step=0.5, format="%.2f", key="global_selic") 
+    with col1: selic_atual = st.number_input("Taxa Selic (%)", value=val_selic_inicial, step=0.25, format="%.2f", key="global_selic") 
     with col2: cdi_estimado = selic_atual - 0.10; st.metric("CDI Estimado (%)", f"{cdi_estimado:.2f}%")
     with col3: ipca_estimado = st.number_input("IPCA Projetado (%)", value=4.50, step=0.5, format="%.2f", key="global_ipca")
 
@@ -456,68 +456,290 @@ def mostrar_tela_login(chave):
 with aba_patrimonio:
     if not st.session_state.get('logado', False): mostrar_tela_login("inv")
     else:
+        # --- CABEÇALHO ---
         c_topo1, c_topo2 = st.columns([3, 1])
         with c_topo1:
             st.subheader("💰 Controle de Patrimônio")
-            st.caption("Cadastre seus investimentos e veja quanto eles valem HOJE (Estimativa).")
+            st.caption("Resumo atualizado da sua carteira de investimentos.")
         with c_topo2:
             if st.button("🔄 Atualizar", key="btn_up_invest"):
                 st.cache_data.clear()
                 st.rerun()
+
+        # ==============================================================================
+        # 1. LEITURA DE DADOS E CÁLCULOS (ANTECIPADO PARA O TOPO)
+        # ==============================================================================
+        res = [] # Lista de resultados para usar na tabela e no gerenciador
+        df_full = pd.DataFrame()
+        df_user = pd.DataFrame()
+        df_hist = get_historico_selic_df() # Carrega Selic uma vez
         
+        try:
+            p = conectar()
+            if p:
+                aba_inv = p.worksheet("investimentos")
+                todos_dados = aba_inv.get_all_records()
+                df_full = pd.DataFrame(todos_dados)
+                
+                # Filtra usuário atual
+                if not df_full.empty and "usuario" in df_full.columns:
+                    df_user = df_full[df_full["usuario"].astype(str).str.lower() == st.session_state['usuario_atual'].lower()].copy()
+                
+                # Se tiver dados, faz os cálculos
+                if not df_user.empty:
+                    ti = 0; ta = 0
+                    
+                    for idx, r in df_user.iterrows():
+                        try: dt = datetime.strptime(str(r['data_compra']), "%d/%m/%Y")
+                        except: continue
+                        
+                        # Limpeza e conversão
+                        vi = float(str(r['valor_inicial']).replace("R$","").replace(".","").replace(",","."))
+                        tc = float(str(r['taxa']).replace(",", "."))
+                        
+                        # Define ID
+                        item_id = str(r.get('id_invest', '')) # Atualizado para id_invest conforme sua planilha
+                        if not item_id: item_id = f"temp_{idx}"
+
+                        # Cálculo do Valor Bruto (VA)
+                        if r['indexador'] == "% do CDI": 
+                            va = calcular_valor_futuro_dinamico(vi, dt, tc, df_hist, selic_atual)
+                        else:
+                            dias = (datetime.now() - dt).days
+                            txa = calcular_taxa_anual_bruta_simples(r['indexador'], tc, cdi_estimado, ipca_estimado)
+                            va = vi * ((1 + txa)**(dias/365))
+                        
+                        # Cálculo do Líquido e IR
+                        dias_corridos = (datetime.now() - dt).days
+                        lucro_bruto = va - vi
+                        imposto = 0.0
+                        
+                        # Verifica Isenção
+                        if "Isento" in str(r.get("tributacao", "")):
+                            imposto = 0.0
+                        else:
+                            imposto = lucro_bruto * calcular_aliquota_ir(dias_corridos)
+                        
+                        lucro_liq = lucro_bruto - imposto
+                        
+                        # Adiciona à lista de resultados
+                        res.append({
+                            "Nome": r['nome'], 
+                            "Instituição": r.get('instituicao', ''), 
+                            "Data": r['data_compra'], 
+                            "Valor Investido": vi, 
+                            "Valor Hoje": va - imposto, 
+                            "Lucro Líquido": lucro_liq, 
+                            "IR Pago": imposto, 
+                            "Rent. Líquida": f"{(lucro_liq/vi)*100:.2f}%",
+                            "ID_OCULTO": item_id
+                        })
+                        ti += vi; ta += (va - imposto)
+
+                    # --- EXIBIÇÃO DO RESUMO (TOPO) ---
+                    k1, k2, k3 = st.columns(3)
+                    k1.metric("Patrimônio Líquido Estimado", formatar_real(ta))
+                    k2.metric("Total Investido", formatar_real(ti))
+                    k3.metric("Lucro Líquido Acumulado", formatar_real(ta-ti), delta=f"{((ta/ti)-1)*100:.1f}%" if ti>0 else "0%")
+                    
+                    df_exibir = pd.DataFrame(res).drop(columns=["ID_OCULTO"])
+                    
+                    st.dataframe(
+                        df_exibir, 
+                        column_config={
+                            "Valor Investido": st.column_config.NumberColumn("Valor Investido", format="R$ %.2f"),
+                            "Valor Hoje": st.column_config.NumberColumn("Valor Hoje", format="R$ %.2f"),
+                            "Lucro Líquido": st.column_config.NumberColumn("Lucro Líquido", format="R$ %.2f"),
+                            "IR Pago": st.column_config.NumberColumn("IR Pago", format="R$ %.2f"),
+                            "Rent. Líquida": st.column_config.TextColumn("Rent. Líquida")
+                        },
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                else:
+                    st.info("Nenhum investimento cadastrado. Utilize o formulário abaixo para começar.")
+
+        except Exception as e: st.warning(f"Aguardando conexão... ({e})")
+
+        st.divider()
+
+        # ==============================================================================
+        # 2. ADICIONAR NOVO INVESTIMENTO (EXPANDER 1)
+        # ==============================================================================
         with st.expander("➕ Adicionar Novo Investimento", expanded=False):
             with st.form("form_investimentos"):
-    
                 c1, c2, c3 = st.columns(3)
-
                 with c1:
-                    st.text_input("Dono", st.session_state['usuario_atual'], disabled=True)
-                    dat = st.date_input("Data da aplicação", format="DD/MM/YYYY")
-
+                    nom = st.text_input("Nome do investimento", key="inv_nome")
+                    dat = st.date_input("Data da aplicação", format="DD/MM/YYYY", key="inv_data")
                 with c2:
-                    nom = st.text_input("Nome do investimento")
-                    inst = st.text_input("Banco / Corretora")
-                    val = st.number_input("Valor aplicado (R$)", 0.0, step=100.0, format="%.2f")
-
+                    inst = st.text_input("Banco / Corretora", key="inv_inst")
+                    val = st.number_input("Valor aplicado (R$)", 0.0, step=100.0, format="%.2f", key="inv_val")
+                    st.text_input("Dono", st.session_state['usuario_atual'], disabled=True)
                 with c3:
-                    trib = st.selectbox("Produto", ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"])
-                    idx = st.selectbox("Indexador", ["% do CDI", "IPCA +", "Taxa Fixa"])
-                    tx = st.number_input("Taxa", 0.0, step=0.5)
-
-                salvar = st.form_submit_button("Salvar")
-
-                if salvar:
+                    idx = st.selectbox("Indexador", ["% do CDI", "IPCA +", "Taxa Fixa"], key="inv_idx")
+                    tx = st.number_input("Taxa", 0.0, step=0.5, key="inv_tx")
+                    trib = st.selectbox("Tributação", ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"], key="inv_trib")
+                
+                if st.form_submit_button("Salvar"):
                     if val > 0:
                         try:
-                            # Gera um ID único universal
                             novo_id = str(uuid.uuid4())
-                            
-                            # Salva respeitando a ordem: ID na primeira coluna
+                            # Salvando com ID na primeira coluna (conforme solicitado anteriormente)
                             conectar().worksheet("investimentos").append_row([
                                 novo_id,
-                                dat.strftime("%d/%m/%Y"),
-                                nom,
-                                inst,
-                                val,
-                                idx,
-                                tx,
-                                trib,
-                                st.session_state['usuario_atual']
+                                dat.strftime("%d/%m/%Y"), nom, inst, val, idx, tx, trib, st.session_state['usuario_atual']
                             ])
                             st.success("Cadastrado!")
-                            st.cache_data.clear()
-                            st.rerun()
-                        except:
-                            st.error("Erro no salvamento.")
+                            for k in ["inv_nome", "inv_inst", "inv_val", "inv_tx"]:
+                                if k in st.session_state: del st.session_state[k]
+                            st.cache_data.clear(); st.rerun()
+                        except: st.error("Erro no salvamento.")
+                    else: st.warning("Valor zerado.")
+
+        # ==============================================================================
+        # 3. GERENCIAR INVESTIMENTOS (EXPANDER 2)
+        # ==============================================================================
+        with st.expander("📝 Gerenciar Investimentos Cadastrados", expanded=False):
+            # Prepara lista de opções baseada nos dados lidos lá em cima
+            opcoes_investimentos = {}
+            if res:
+                for r in res:
+                    opcoes_investimentos[r['ID_OCULTO']] = f"{r['Nome']} - {r['Data']}"
+            
+            inv_selecionado_id = st.selectbox(
+                "Selecione o investimento:", 
+                options=["Selecione..."] + list(opcoes_investimentos.keys()),
+                format_func=lambda x: opcoes_investimentos.get(x, "Selecione...")
+            )
+            
+            # Layout de 4 colunas para os botões
+            c_vazio1, c_edit, c_del, c_vazio2 = st.columns(4)
+            
+            # --- BOTÃO EDITAR ---
+            with c_edit:
+                if st.button("✏️ Editar", use_container_width=True):
+                    if inv_selecionado_id == "Selecione...":
+                        st.warning("Selecione um item!")
                     else:
-                        st.warning("Valor zerado.")
+                        # Ativa o modo de edição para este ID
+                        st.session_state['editando_id'] = inv_selecionado_id
+                        st.rerun()
+
+            # --- BOTÃO EXCLUIR ---
+            with c_del:
+                with st.popover("🗑️ Excluir", use_container_width=True):
+                    st.write("Tem certeza que deseja excluir?")
+                    if st.button("Sim, excluir", type="primary"):
+                        if inv_selecionado_id != "Selecione...":
+                            try:
+                                # Filtra removendo o ID selecionado (Coluna id_invest)
+                                df_nova = df_full[df_full['id_invest'].astype(str) != inv_selecionado_id]
+                                
+                                aba_inv.clear()
+                                aba_inv.update([df_nova.columns.values.tolist()] + df_nova.astype(str).values.tolist())
+                                
+                                st.success("Excluído!")
+                                time.sleep(1); st.rerun()
+                            except Exception as ex: st.error(f"Erro: {ex}")
+                        else:
+                            st.error("Nada selecionado.")
+
+            # --- FORMULÁRIO DE EDIÇÃO (Aparece abaixo dos botões se ativado) ---
+            if st.session_state.get('editando_id') == inv_selecionado_id and inv_selecionado_id != "Selecione...":
+                st.divider()
+                # Pega os dados atuais da linha selecionada
+                try:
+                    item_dados = df_user[df_user['id_invest'].astype(str) == inv_selecionado_id].iloc[0]
+                    
+                    st.markdown(f"**Editando:** {item_dados['nome']}")
+                    
+                    with st.form("form_editar_investimento"):
+                        ce1, ce2 = st.columns(2)
+                        with ce1:
+                            ennome = st.text_input("Nome", value=item_dados['nome'])
+                            # Tratamento seguro da data
+                            try: d_obj = datetime.strptime(str(item_dados['data_compra']), "%d/%m/%Y")
+                            except: d_obj = datetime.now()
+                            endata = st.date_input("Data", value=d_obj, format="DD/MM/YYYY")
+                        
+                        with ce2:
+                            eninst = st.text_input("Instituição", value=item_dados.get('instituicao', ''))
+                            # Tratamento seguro do valor
+                            val_str = str(item_dados['valor_inicial']).replace("R$","").replace(".","").replace(",",".")
+                            try: val_float = float(val_str)
+                            except: val_float = 0.0
+                            enval = st.number_input("Valor", value=val_float, step=100.0, format="%.2f")
+
+                        ce3, ce4, ce5 = st.columns(3)
+                        with ce3:
+                            # Tenta encontrar o índice atual, se falhar usa 0
+                            lista_idx = ["% do CDI", "IPCA +", "Taxa Fixa"]
+                            curr_idx = item_dados['indexador']
+                            idx_pos = lista_idx.index(curr_idx) if curr_idx in lista_idx else 0
+                            enidx = st.selectbox("Indexador", lista_idx, index=idx_pos)
+                        
+                        with ce4:
+                            # Tratamento da taxa
+                            try: tx_float = float(str(item_dados['taxa']).replace(",", "."))
+                            except: tx_float = 0.0
+                            entx = st.number_input("Taxa", value=tx_float, step=0.5, format="%.2f")
+                        
+                        with ce5:
+                            # Tratamento da tributação
+                            lista_trib = ["Tributado (CDB, RDB, LC, Tesouro)", "Isento (LCI, LCA, CRI, CRA)"]
+                            curr_trib = item_dados.get('tributacao', '')
+                            # Lógica simples para encontrar qual selecionar
+                            idx_trib = 1 if "Isento" in curr_trib else 0
+                            entrib = st.selectbox("Tributação", lista_trib, index=idx_trib)
+
+                        c_save, c_cancel = st.columns([1, 1])
+                        with c_save:
+                            if st.form_submit_button("💾 Salvar Alterações", type="primary"):
+                                try:
+                                    # Localiza o índice real no DataFrame COMPLETO (df_full)
+                                    idx_geral = df_full[df_full['id_invest'].astype(str) == inv_selecionado_id].index[0]
+                                    
+                                    # Atualiza os valores
+                                    df_full.at[idx_geral, 'nome'] = ennome
+                                    df_full.at[idx_geral, 'data_compra'] = endata.strftime("%d/%m/%Y")
+                                    df_full.at[idx_geral, 'instituicao'] = eninst
+                                    df_full.at[idx_geral, 'valor_inicial'] = enval
+                                    df_full.at[idx_geral, 'indexador'] = enidx
+                                    df_full.at[idx_geral, 'taxa'] = entx
+                                    df_full.at[idx_geral, 'tributacao'] = entrib
+                                    
+                                    # Grava no Google Sheets
+                                    aba_inv.clear()
+                                    # Converte para string para garantir que datas/numeros não quebrem o JSON
+                                    lista_dados = [df_full.columns.values.tolist()] + df_full.astype(str).values.tolist()
+                                    aba_inv.update(lista_dados)
+                                    
+                                    st.success("Investimento atualizado com sucesso!")
+                                    st.session_state['editando_id'] = None # Fecha o editor
+                                    time.sleep(1)
+                                    st.rerun()
+                                except Exception as ex:
+                                    st.error(f"Erro ao atualizar: {ex}")
+                        with c_cancel:
+                            if st.form_submit_button("Cancelar"):
+                                st.session_state['editando_id'] = None
+                                st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao carregar dados para edição: {e}")
+
+        # ==============================================================================
+        # 4. GERENCIAR HISTÓRICO SELIC (EXPANDER 3)
+        # ==============================================================================
         with st.expander("⚙️ Gerenciar Histórico Selic", expanded=False):
             c_h1, c_h2 = st.columns([2, 1])
-            df_hist = get_historico_selic_df()
             def_data = datetime.now(); def_tx = 11.25
+            
+            # Usa df_hist carregado no topo
             if not df_hist.empty:
                 ult = df_hist.sort_values('data_inicio', ascending=False).iloc[0]
                 def_data = ult['data_inicio']; def_tx = float(ult['taxa_anual'])
+            
             with c_h1:
                 st.info("Cadastre aqui as taxas Selic que ainda não estão no histórico.")
                 data_selic = st.date_input("Data da Mudança da Taxa", value=def_data, key="hist_data")
@@ -526,136 +748,14 @@ with aba_patrimonio:
                     try:
                         p = conectar()
                         p.worksheet("historico_selic").append_row([data_selic.strftime("%d/%m/%Y"), taxa_selic_hist])
-                        st.success("Salvo!")
-                        st.cache_data.clear()
-                        st.rerun()
+                        st.success("Salvo!"); st.cache_data.clear(); st.rerun()
                     except: st.error("Erro.")
             with c_h2:
                 if not df_hist.empty:
                     df_hist['Data'] = df_hist['data_inicio'].dt.strftime("%d/%m/%Y")
-                    df_hist_sorted = df_hist.sort_values('data_inicio', ascending=False)
-                    st.dataframe(
-                        df_hist_sorted[['Data', 'taxa_anual']].style.format({"taxa_anual": "{:.2f}"}),
-                        height=200,
-                        hide_index=True,
-                        use_container_width=True
-                    )
-        
-        try:
-            p = conectar()
-            if p:
-                df_i = pd.DataFrame(p.worksheet("investimentos").get_all_records())
-                if not df_i.empty and "usuario" in df_i.columns:
-                    df_i = df_i[df_i["usuario"].astype(str).str.lower() == st.session_state['usuario_atual'].lower()]
-                
-                if not df_i.empty:
-                    df_s = get_historico_selic_df()
-                    res = []
-                    ti = 0                # total investido
-                    total_bruto = 0       # valor antes do IR
-                    total_liquido = 0     # valor após IR
-                    total_ir = 0          # IR total
-
-                    for _, r in df_i.iterrows():
-                        try: dt = datetime.strptime(str(r['data_compra']), "%d/%m/%Y")
-                        except: continue
-                        vi = float(str(r['valor_inicial']).replace("R$","").replace(".","").replace(",","."))
-                        tc = float(str(r['taxa']).replace(",", "."))
-                        
-                        if r['indexador'] == "% do CDI": va = calcular_valor_futuro_dinamico(vi, dt, tc, df_s, selic_atual)
-                        else:
-                            dias = (datetime.now() - dt).days
-                            txa = calcular_taxa_anual_bruta_simples(r['indexador'], tc, cdi_estimado, ipca_estimado)
-                            va = vi * ((1 + txa)**(dias/365))
-                        
-                        dias = (datetime.now() - dt).days
-
-                        lucro_bruto = va - vi
-
-                        if "Isento" in str(r.get("tributacao", "")):
-                            imposto = 0.0
-                        else:
-                            imposto = lucro_bruto * calcular_aliquota_ir(dias)
-                        
-                        lucro_liquido = lucro_bruto - imposto
-
-                        # ACUMULADORES ATUALIZADOS
-                        ti += vi
-                        total_bruto += va
-                        total_liquido += (va - imposto)
-                        total_ir += imposto
-
-                        res.append({
-                            "Nome": r['nome'],
-                            "Instituição": r['instituicao'],
-                            "Data": r['data_compra'],
-                            "Valor Investido": vi,
-                            "Valor Hoje": va - imposto,  # valor líquido
-                            "Lucro Líquido": lucro_liquido,
-                            "IR Pago": imposto,
-                            "Rent. Líquida": f"{(lucro_liquido/vi)*100:.2f}%"
-                        })
-
-                    k1, k2, k3 = st.columns(3)
-                    k1.metric("Patrimônio bruto aproximado", formatar_real(total_bruto))
-                    k2.metric("IR a Pagar", formatar_real(total_ir))
-                    k3.metric("Patrimônio líquido aproximado", formatar_real(total_liquido))
-
-                    k4, k5, k6 = st.columns(3)
-                    k4.metric("Investido", formatar_real(ti))
-                    k5.metric("Lucro aproximado", formatar_real(total_liquido - ti),
-                              delta=f"{((total_liquido/ti)-1)*100:.1f}%" if ti>0 else "0%")
-                    k6.write("")
-
-                    st.dataframe(
-                        pd.DataFrame(res).style
-                        .format({
-                            "Valor Investido": "R$ {:,.2f}", 
-                            "Valor Hoje": "R$ {:,.2f}", 
-                            "Lucro Líquido": "R$ {:,.2f}", 
-                            "IR Pago": "R$ {:,.2f}"
-                        })
-                        .set_properties(**{'text-align': 'center'}) 
-                        .set_table_styles([dict(selector='th', props=[('text-align', 'center')])]), 
-                        use_container_width=True, 
-                        hide_index=True
-                    )
-                    
-                    st.divider()
-                    
-                    # --- ÁREA DE GESTÃO (VISUAL) ---
-                    with st.expander("📝 Gerenciar Investimentos Cadastrados", expanded=False):
-                        # Lista simples para o selectbox (Nome do investimento)
-                        opcoes = ["Selecione..."] + [f"{r['Nome']} - {r['Data']}" for r in res]
-                        
-                        item_selecionado = st.selectbox("Selecione o investimento:", opcoes)
-                        
-                        # Layout em 4 colunas conforme solicitado
-                        c_vazio1, c_edit, c_del, c_vazio2 = st.columns(4)
-                        
-                        with c_edit:
-                            if st.button("✏️ Editar", use_container_width=True):
-                                if item_selecionado == "Selecione...":
-                                    st.warning("Selecione um item!")
-                                else:
-                                    st.info(f"Editar: {item_selecionado}")
-                        
-                        with c_del:
-                            if st.button("🗑️ Excluir", type="primary", use_container_width=True):
-                                if item_selecionado == "Selecione...":
-                                    st.warning("Selecione um item!")
-                                else:
-                                    st.error(f"Excluir: {item_selecionado}")
-                    
-                    with c_del:
-                        if st.button("🗑️ Excluir", type="primary", use_container_width=True):
-                            if item_selecionado == "Selecione...":
-                                st.warning("Selecione um item!")
-                            else:
-                                st.error(f"Excluir: {item_selecionado}")
-
-                else: st.info("Nenhum investimento seu.")
-        except: st.warning("Sem dados.")
+                    # Ordenação correta
+                    df_exibicao = df_hist.sort_values('data_inicio', ascending=False)[['Data', 'taxa_anual']]
+                    st.dataframe(df_exibicao.style.format({"taxa_anual": "{:.2f}"}), height=200, hide_index=True, use_container_width=True)
 
 # --- ABA 6: DESPESAS ---
 with aba_despesas:
