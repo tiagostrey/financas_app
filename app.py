@@ -583,21 +583,36 @@ with aba_patrimonio:
                 with c5:
                     tx = st.number_input("Taxa", 0.0, step=0.5, key="inv_tx")
 
-                if st.form_submit_button("Salvar"):
+                # Layout de Botões (Padronizado 4 colunas)
+                c_vazio1, c_salvar, c_cancelar, c_vazio2 = st.columns(4)
+                
+                with c_salvar:
+                    salvar = st.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
+                
+                with c_cancelar:
+                    cancelar = st.form_submit_button("Cancelar", use_container_width=True)
+
+                if salvar:
                     if val > 0:
                         try:
                             novo_id = str(uuid.uuid4())
-                            # Salvando com ID na primeira coluna (conforme solicitado anteriormente)
                             conectar().worksheet("investimentos").append_row([
                                 novo_id,
                                 dat.strftime("%d/%m/%Y"), nom, inst, val, idx, tx, trib, st.session_state['usuario_atual']
                             ])
                             st.success("Cadastrado!")
+                            # Limpa campos
                             for k in ["inv_nome", "inv_inst", "inv_val", "inv_tx"]:
                                 if k in st.session_state: del st.session_state[k]
                             st.cache_data.clear(); st.rerun()
-                        except: st.error("Erro no salvamento.")
+                        except Exception as e: st.error(f"Erro no salvamento: {e}")
                     else: st.warning("Valor zerado.")
+                
+                if cancelar:
+                    # Limpa campos e recarrega
+                    for k in ["inv_nome", "inv_inst", "inv_val", "inv_tx"]:
+                        if k in st.session_state: del st.session_state[k]
+                    st.rerun()
 
         # ==============================================================================
         # 3. GERENCIAR INVESTIMENTOS (EXPANDER 2)
@@ -695,38 +710,43 @@ with aba_patrimonio:
                         
 
 
-                        c_save, c_cancel, c_vazio_a, c_vazio_b = st.columns([1.5, 1, 2, 2])
-                        with c_save:
-                            if st.form_submit_button("💾 Salvar Alterações", type="primary"):
-                                try:
-                                    # Localiza o índice real no DataFrame COMPLETO (df_full)
-                                    idx_geral = df_full[df_full['id_invest'].astype(str) == inv_selecionado_id].index[0]
-                                    
-                                    # Atualiza os valores
-                                    df_full.at[idx_geral, 'nome'] = ennome
-                                    df_full.at[idx_geral, 'data_compra'] = endata.strftime("%d/%m/%Y")
-                                    df_full.at[idx_geral, 'instituicao'] = eninst
-                                    df_full.at[idx_geral, 'valor_inicial'] = enval
-                                    df_full.at[idx_geral, 'indexador'] = enidx
-                                    df_full.at[idx_geral, 'taxa'] = entx
-                                    df_full.at[idx_geral, 'tributacao'] = entrib
-                                    
-                                    # Grava no Google Sheets
-                                    aba_inv.clear()
-                                    # Converte para string para garantir que datas/numeros não quebrem o JSON
-                                    lista_dados = [df_full.columns.values.tolist()] + df_full.astype(str).values.tolist()
-                                    aba_inv.update(lista_dados)
-                                    
-                                    st.success("Investimento atualizado com sucesso!")
-                                    st.session_state['editando_id'] = None # Fecha o editor
-                                    time.sleep(1)
-                                    st.rerun()
-                                except Exception as ex:
-                                    st.error(f"Erro ao atualizar: {ex}")
-                        with c_cancel:
-                            if st.form_submit_button("Cancelar"):
-                                st.session_state['editando_id'] = None
+                        c_vazio_ed1, c_save_ed, c_cancel_ed, c_vazio_ed2 = st.columns(4)
+                        
+                        with c_save_ed:
+                            salvar_edicao = st.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
+                        
+                        with c_cancel_ed:
+                            cancelar_edicao = st.form_submit_button("Cancelar", use_container_width=True)
+
+                        if salvar_edicao:
+                            try:
+                                # Localiza o índice real no DataFrame COMPLETO (df_full)
+                                idx_geral = df_full[df_full['id_invest'].astype(str) == inv_selecionado_id].index[0]
+                                
+                                # Atualiza os valores
+                                df_full.at[idx_geral, 'nome'] = ennome
+                                df_full.at[idx_geral, 'data_compra'] = endata.strftime("%d/%m/%Y")
+                                df_full.at[idx_geral, 'instituicao'] = eninst
+                                df_full.at[idx_geral, 'valor_inicial'] = enval
+                                df_full.at[idx_geral, 'indexador'] = enidx
+                                df_full.at[idx_geral, 'taxa'] = entx
+                                df_full.at[idx_geral, 'tributacao'] = entrib
+                                
+                                # Grava no Google Sheets
+                                aba_inv.clear()
+                                lista_dados = [df_full.columns.values.tolist()] + df_full.astype(str).values.tolist()
+                                aba_inv.update(lista_dados)
+                                
+                                st.success("Investimento atualizado com sucesso!")
+                                st.session_state['editando_id'] = None 
+                                time.sleep(1)
                                 st.rerun()
+                            except Exception as ex:
+                                st.error(f"Erro ao atualizar: {ex}")
+                        
+                        if cancelar_edicao:
+                            st.session_state['editando_id'] = None
+                            st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao carregar dados para edição: {e}")
 
