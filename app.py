@@ -7,7 +7,7 @@ from abas import comparativo, calculadora, metas, compras, investimentos, despes
 # ==================================================
 # CONFIGURAÇÃO GERAL E ESTADO
 # ==================================================
-st.set_page_config(page_title="Finanças Família", page_icon="💰", layout="wide")
+st.set_page_config(page_title="Controle Financeiro", page_icon="💰", layout="wide")
 
 if 'logado' not in st.session_state:
     st.session_state['logado'] = False
