@@ -12,14 +12,53 @@ bot = telebot.TeleBot(TOKEN)
 
 # Listas de palavras-chave para a inteligência
 CAT_MAP = {
-    'alimentacao': 'Alimentação', 'alimentação': 'Alimentação', 'comida': 'Alimentação', 'mercado': 'Alimentação', 'lanche': 'Alimentação',
-    'transporte': 'Transporte', 'uber': 'Transporte', 'gasolina': 'Transporte', 'combustivel': 'Transporte',
-    'lazer': 'Lazer', 'cinema': 'Lazer',
-    'casa': 'Casa', 'aluguel': 'Casa', 'luz': 'Casa', 'internet': 'Casa',
-    'saude': 'Saúde', 'saúde': 'Saúde', 'farmacia': 'Saúde',
+    # Alimentação
+    'alimentacao': 'Alimentação', 'alimentação': 'Alimentação',
+    'comida': 'Alimentação', 'mercado': 'Alimentação', 'mercadinho': 'Alimentação',
+    'lanche': 'Alimentação', 'lancheria': 'Alimentação',
+    'xis': 'Alimentação',
+    'pizza': 'Alimentação', 'pizzaria': 'Alimentação',
+    'churrasco': 'Alimentação', 'churras': 'Alimentação',
+    'bebida': 'Alimentação', 'refri': 'Alimentação', 'refrigerante': 'Alimentação',
+    'doce': 'Alimentação', 'salgado': 'Alimentação', 'salgadinho': 'Alimentação',
+
+    # Transporte
+    'transporte': 'Transporte', 'uber': 'Transporte', 'gasolina': 'Transporte',
+    'combustivel': 'Transporte', 'combustível': 'Transporte',
+    'onibus': 'Transporte', 'ônibus': 'Transporte',
+
+    # Saúde
+    'saude': 'Saúde', 'saúde': 'Saúde', 'farmacia': 'Saúde', 'farmácia': 'Saúde',
+    'medico': 'Saúde', 'médico': 'Saúde',
+    'dentista': 'Saúde',
+
+    # Casa
+    'casa': 'Casa', 'aluguel': 'Casa', 'aluguel': 'Casa',
+    'luz': 'Casa', 'energia': 'Casa',
+    'agua': 'Casa', 'água': 'Casa',
+    'internet': 'Casa',
+    'condominio': 'Casa', 'condomínio': 'Casa',
+    'limpeza': 'Casa',
+
+    # Lazer
+    'lazer': 'Lazer', 'cinema': 'Lazer', 'show': 'Lazer', 'bar': 'Lazer',
+    'parque': 'Lazer',
+
+    # Educação
     'educacao': 'Educação', 'educação': 'Educação',
-    'outros': 'Outros'
+    'curso': 'Educação', 'faculdade': 'Educação', 'livro': 'Educação',
+
+    # Tecnologia (Nova)
+    'celular': 'Tecnologia', 'iphone': 'Tecnologia', 'android': 'Tecnologia',
+    'notebook': 'Tecnologia', 'laptop': 'Tecnologia',
+    'fone': 'Tecnologia', 'fonebluetooth': 'Tecnologia', 'fones': 'Tecnologia',
+    'mouse': 'Tecnologia', 'teclado': 'Tecnologia',
+    'carregador': 'Tecnologia', 'cabo': 'Tecnologia', 'adaptador': 'Tecnologia',
+
+    # Outros
+    'outros': 'Outros', 'diverso': 'Outros'
 }
+
 
 PGTO_MAP = {
     'credito': 'Crédito', 'crédito': 'Crédito', 'cc': 'Crédito',
@@ -90,49 +129,124 @@ def vincular_usuario(telegram_id, nome_informado):
 # ==============================================================================
 
 def interpretar_mensagem(texto):
-    """Separa Valor, Item, Categoria e Pagamento da frase."""
     partes = texto.split()
     
     valor = 0.0
-    categoria = "Outros"
-    pagamento = "Outros" # Padrão se não achar
+    categoria_detectada = None
+    pagamento = "Outros"
     palavras_do_item = []
 
     for palavra in partes:
         p_lower = palavra.lower()
-        
-        # 1. Valor (tem números dentro da palavra?)
+
+        # 1. Valor
         if any(c.isdigit() for c in palavra) and valor == 0.0:
-            clean_val = palavra.lower().replace("r$", "").replace("r", "").replace("$", "")
-
-            valor_normalizado = normalizar_valor(clean_val)
-
-            if valor_normalizado is not None:
-                valor = valor_normalizado
+            val = normalizar_valor(palavra)
+            if val is not None:
+                valor = val
                 continue
 
-
-        # 2. Categoria
+        # 2. Categoria (mapeamento inteligente)
         if p_lower in CAT_MAP:
-            categoria = CAT_MAP[p_lower]
+            if categoria_detectada is None:
+                categoria_detectada = CAT_MAP[p_lower]
+            # Mesmo sendo categoria, faz parte do item
+            palavras_do_item.append(palavra)
             continue
 
-        # 3. Pagamento
+        # 3. Forma de Pagamento
         if p_lower in PGTO_MAP:
             pagamento = PGTO_MAP[p_lower]
             continue
 
-        # 4. Resto é Item
+        # 4. Resto vira o item
         palavras_do_item.append(palavra)
 
-    item_final = " ".join(palavras_do_item)
-    if not item_final: item_final = "Gasto Geral"
+    item_final = " ".join(palavras_do_item).strip()
+    if not item_final:
+        item_final = "Gasto Geral"
 
-    return item_final, valor, categoria, pagamento
+    if categoria_detectada is None:
+        categoria_detectada = "Outros"
+
+    return item_final, valor, categoria_detectada, pagamento
 
 # ==============================================================================
 # HANDLERS (O CÉREBRO DO BOT)
 # ==============================================================================
+
+@bot.message_handler(commands=['desfazer'])
+def desfazer(message):
+    chat_id = message.chat.id
+    usuario = buscar_usuario_por_telegram(chat_id)
+
+    if not usuario:
+        bot.reply_to(message, "❗ Não encontrei seu cadastro. Envie seu nome de usuário primeiro.")
+        return
+
+    try:
+        p = conectar()
+        aba = p.worksheet("registros")
+        linhas = aba.get_all_values()
+
+        # Se só tem cabeçalho → nada a apagar
+        if len(linhas) <= 1:
+            bot.reply_to(message, "A planilha está vazia.")
+            return
+
+        ultima_linha = linhas[-1]   # Última linha com dados
+        num_linha = len(linhas)    # Número real da linha
+        usuario_ultimo = ultima_linha[6]  # Coluna G
+
+        if usuario_ultimo != usuario:
+            bot.reply_to(message, f"⛔ Não foi possível excluir o seu último registro. Por favor, utilize o app.")
+            return
+
+        item = ultima_linha[1]
+        valor = ultima_linha[2]
+
+        # Apaga a linha (SEM deixar buracos!)
+        aba.delete_rows(num_linha)
+
+        bot.reply_to(
+            message,
+            f"🗑️ Registro apagado!\nItem: **{item}**\nValor: **R$ {valor}**"
+        )
+
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erro ao apagar: {e}")
+
+# COMANDOS /start E /ajuda
+@bot.message_handler(commands=['start'])
+def iniciar(message):
+    bot.reply_to(
+        message,
+        "👋 *Bem-vindo ao Controle Financeiro!*\n\n"
+        "Envie mensagens como:\n"
+        "• `mercado 50`\n"
+        "• `uber 20 crédito`\n"
+        "• `pizza 40`\n\n"
+        "O bot identifica automaticamente o *item*, *valor*, *categoria* e *forma de pagamento*.\n\n"
+        "Se for seu primeiro acesso, informe o seu *nome de usuário* cadastrado no App.\n\n"
+        "Use `/ajuda` para ver mais comandos.",
+        parse_mode="Markdown"
+    )
+
+
+@bot.message_handler(commands=['help', 'ajuda'])
+def ajuda(message):
+    bot.reply_to(
+        message,
+        "📘 *Comandos disponíveis:*\n\n"
+        "• `/desfazer` — Remove o *último lançamento* registrado na planilha, "
+        "desde que ele tenha sido feito por você *e* seja realmente o último da lista.\n\n"
+        "• Para registrar despesas, basta enviar frases como:\n"
+        "  `mercado 50`, `uber 20 crédito`, `pizza 40`, `gasolina 100 debito`.\n\n"
+        "• O bot identifica automaticamente o valor, categoria, item e forma de pagamento.\n\n"
+        "• Se estiver usando o bot pela primeira vez, informe seu *nome de usuário* cadastrado no app.\n\n"
+        "❤️ Obrigado por usar o Controle Financeiro!",
+        parse_mode="Markdown"
+    )
 
 @bot.message_handler(func=lambda m: True)
 def processar(message):
@@ -178,7 +292,15 @@ def processar(message):
             usuario
         ])
         
-        bot.reply_to(message, f"✅ **Lançado!**\nItem: {item}\nValor: R$ {valor:.2f}\nCat: {categoria}\nPgto: {pgto}")
+        bot.reply_to(
+            message,
+            f"✅ **Lançado!**\n"
+            f"Item: {item}\n"
+            f"Valor: R$ {valor:.2f}\n"
+            f"Categoria: {categoria}\n"
+            f"Pagamento: {pgto}\n\n"
+            f"↩️ Não está certo? Envie /desfazer."
+        )
         
     except Exception as e:
         bot.reply_to(message, f"Erro ao salvar: {e}")
