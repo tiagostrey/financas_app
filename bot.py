@@ -1,174 +1,175 @@
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from datetime import datetime, timedelta
-import re
-from segredos import TELEGRAM_TOKEN
 from conexao import conectar
+import pandas as pd
+from datetime import datetime
 
-# 1. Iniciar o Bot
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+# ==============================================================================
+# CONFIGURAÇÕES
+# ==============================================================================
+# Cole seu TOKEN do BotFather aqui (ou use arquivo .env se souber configurar)
+TOKEN = "8468850047:AAHNhy7O9XzODin2biNV1DGeUrEBZw982OM" 
 
-# 2. Memória Temporária
-memoria_temporaria = {}
+bot = telebot.TeleBot(TOKEN)
 
-# 3. Categorias
-CATEGORIAS = ["Alimentação", "Transporte", "Lazer", "Casa", "Saúde", "Outros"]
+# ==============================================================================
+# FUNÇÕES DE GESTÃO DE USUÁRIO (VIA SHEET)
+# ==============================================================================
 
-def obter_usuarios_permitidos():
-    """Busca usuários autorizados na planilha"""
+def buscar_usuario_por_telegram(telegram_id):
+    """
+    Verifica se o ID do Telegram já existe na aba 'usuarios' da planilha.
+    Retorna o 'nome' do usuário se encontrar, ou None se não encontrar.
+    """
     planilha = conectar()
-    if planilha:
-        aba_usuarios = planilha.worksheet("usuarios")
-        dados = aba_usuarios.get_all_records()
-        ids = [int(u['telegram_id']) for u in dados if str(u['telegram_id']).strip()]
-        return ids, planilha
-    return [], None
-
-def analisar_mensagem(texto):
-    """O DETETIVE: Separa Valor, Data, Pagamento e Item"""
-    # A. Valor
-    match_valor = re.search(r'\b\d+[,.]?\d*\b', texto)
-    if match_valor:
-        valor_str = match_valor.group().replace(',', '.')
-        valor = float(valor_str)
-        texto = texto.replace(match_valor.group(), "", 1).strip()
-    else:
+    if not planilha: return None
+    
+    try:
+        aba_user = planilha.worksheet("usuarios")
+        # Pega todos os registros (lista de dicionários)
+        usuarios = aba_user.get_all_records()
+        
+        # Procura o ID (converte para string para garantir comparação)
+        for u in usuarios:
+            if str(u.get('telegram_id', '')).strip() == str(telegram_id):
+                return u['nome'] # Retorna o login do sistema (ex: tiagostrey)
+        return None
+    except Exception as e:
+        print(f"Erro ao buscar usuário: {e}")
         return None
 
-    # B. Pagamento
-    mapa_pagamentos = {
-        "credito": "Crédito", "crédito": "Crédito", "cred": "Crédito", "cc": "Crédito",
-        "debito": "Débito", "débito": "Débito", "deb": "Débito",
-        "pix": "Pix",
-        "dinheiro": "Dinheiro", "cash": "Dinheiro",
-        "boleto": "Boleto"
-    }
-    forma_pagamento = "Carteira/Outros"
-    palavras = texto.split()
-    novas_palavras = []
-    for palavra in palavras:
-        p_limpa = palavra.lower().strip(".,")
-        if p_limpa in mapa_pagamentos:
-            forma_pagamento = mapa_pagamentos[p_limpa]
-        else:
-            novas_palavras.append(palavra)
-    texto = " ".join(novas_palavras)
-
-    # C. Data
-    data_hoje = datetime.now()
-    data_formatada = data_hoje.strftime("%d/%m/%Y")
-    if "ontem" in texto.lower():
-        data_ontem = data_hoje - timedelta(days=1)
-        data_formatada = data_ontem.strftime("%d/%m/%Y")
-        texto = re.sub(r'\bontem\b', '', texto, flags=re.IGNORECASE).strip()
-    elif "anteontem" in texto.lower():
-        data_ante = data_hoje - timedelta(days=2)
-        data_formatada = data_ante.strftime("%d/%m/%Y")
-        texto = re.sub(r'\banteontem\b', '', texto, flags=re.IGNORECASE).strip()
+def vincular_usuario(telegram_id, nome_informado):
+    """
+    Tenta vincular um ID de Telegram a um usuário existente na planilha.
+    """
+    planilha = conectar()
+    if not planilha: return False, "Erro de conexão."
     
-    # D. Item
-    item = texto.strip().capitalize()
-    if not item: item = "Despesa Diversa"
-
-    return {"valor": valor, "item": item, "data": data_formatada, "pagamento": forma_pagamento}
-
-# --- COMANDO DESFAZER (NOVIDADE) ---
-
-@bot.message_handler(commands=['desfazer'])
-def comando_desfazer(message):
-    chat_id = message.chat.id
-    nome_usuario = message.from_user.first_name
-    
-    # Verifica permissão
-    ids, planilha = obter_usuarios_permitidos()
-    if chat_id not in ids: return
-
     try:
-        aba = planilha.worksheet("registros")
-        todas_linhas = aba.get_all_values()
+        aba_user = planilha.worksheet("usuarios")
+        # get_all_records é bom, mas para editar precisamos achar a linha exata (célula)
+        # Vamos usar find para achar o nome
+        cell = aba_user.find(nome_informado)
         
-        # Se só tem o cabeçalho (linha 1), não tem o que apagar
-        if len(todas_linhas) <= 1:
-            bot.reply_to(message, "📭 A planilha já está vazia.")
-            return
-
-        # Pega a última linha
-        ultima_linha = todas_linhas[-1]
-        numero_da_linha = len(todas_linhas)
+        if not cell:
+            return False, "Usuário não encontrado no sistema. Peça ao administrador para criar sua conta primeiro."
         
-        # Estrutura da planilha: 
-        # A:data, B:item, C:valor, D:pagto, E:origem, F:cat, G:usuario
-        # O índice 6 é a Coluna G (Usuário)
-        dono_do_registro = ultima_linha[6]
-        item_apagado = ultima_linha[1]
-        valor_apagado = ultima_linha[2]
+        # Verifica se já tem ID vinculado nessa linha (Coluna 3 assumindo ordem: Nome, Senha, ID)
+        # O ideal é buscar pelo cabeçalho, mas vamos assumir que 'telegram_id' é a coluna C (3) ou D (4)
+        # Vamos ler a linha inteira para ser seguro
+        linha_dados = aba_user.row_values(cell.row)
+        
+        # Cabeçalhos: nome, senha, telegram_id
+        # Se a lista da linha for curta, não tem ID ainda.
+        # Ajuste o índice conforme sua planilha. Se telegram_id for a 3ª coluna, índice é 2.
+        
+        # Maneira mais segura: Atualizar a coluna 'telegram_id' (cabeçalho) na linha encontrada
+        # Acha a coluna do telegram_id
+        header = aba_user.row_values(1)
+        try:
+            col_index = header.index("telegram_id") + 1 # +1 porque gspread usa base 1
+        except:
+            return False, "Erro na Planilha: Coluna 'telegram_id' não existe na aba usuarios."
 
-        # Verifica se foi você mesmo
-        # (Comparação simples de nome. Idealmente usaríamos ID, mas na planilha está o nome)
-        if dono_do_registro == nome_usuario:
-            aba.delete_rows(numero_da_linha)
-            bot.reply_to(message, f"🗑️ **Apagado:** {item_apagado} (R$ {valor_apagado})\nPode enviar novamente.")
-        else:
-            bot.reply_to(message, f"⛔ **Não posso apagar.**\nO último registro é de *{dono_do_registro}*, não seu.")
+        val_atual = aba_user.cell(cell.row, col_index).value
+        
+        if val_atual and str(val_atual).strip() != "":
+            return False, "Este usuário já possui um Telegram vinculado."
             
+        # Realiza o vínculo
+        aba_user.update_cell(cell.row, col_index, str(telegram_id))
+        return True, f"Sucesso! Telegram vinculado ao usuário **{nome_informado}**."
+        
     except Exception as e:
-        bot.reply_to(message, f"❌ Erro ao desfazer: {e}")
+        return False, f"Erro ao vincular: {e}"
 
-# --- OUVINTE DE MENSAGENS ---
+# ==============================================================================
+# LÓGICA DO BOT
+# ==============================================================================
 
 @bot.message_handler(func=lambda message: True)
 def receber_mensagem(message):
     chat_id = message.chat.id
-    ids_permitidos, planilha = obter_usuarios_permitidos()
+    texto = message.text.strip()
     
-    if chat_id not in ids_permitidos:
-        bot.reply_to(message, f"⛔ Acesso Negado (ID: {chat_id})")
+    print(f"📩 Msg de {chat_id}: {texto}")
+
+    # 1. IDENTIFICAÇÃO: Quem é esse Telegram ID?
+    usuario_planilha = buscar_usuario_por_telegram(chat_id)
+
+    # --- CENÁRIO A: USUÁRIO DESCONHECIDO (Tenta Vincular) ---
+    if not usuario_planilha:
+        # Se o usuário mandou o comando /start, damos as boas vindas
+        if texto == "/start":
+            bot.reply_to(message, "👋 Olá! Não encontrei seu Telegram no sistema.\n\nPara vincular, responda com seu **Nome de Usuário** do App (ex: tiagostrey).")
+            return
+
+        # Tenta usar o texto enviado como "Nome de Usuário" para fazer o vínculo
+        sucesso, resposta = vincular_usuario(chat_id, texto)
+        
+        if sucesso:
+            bot.reply_to(message, f"✅ {resposta}\n\nAgora você pode enviar seus gastos! Tente enviar: `Padaria 20`")
+        else:
+            bot.reply_to(message, f"🚫 {resposta}\n\nTente novamente enviar apenas seu usuário correto ou contate o administrador.")
         return
 
-    dados = analisar_mensagem(message.text)
-    if not dados:
-        bot.reply_to(message, "🤷‍♂️ Não entendi o valor. Tente: 'Mercado 50'")
+    # --- CENÁRIO B: USUÁRIO AUTORIZADO (Processa Despesa) ---
+    
+    # Validação básica de formato (ex: Padaria 20.00)
+    partes = texto.split()
+    if len(partes) < 2:
+        bot.reply_to(message, f"Oi, {usuario_planilha}! 👋\nPara lançar, envie: `Item Valor`\nEx: `Padaria 15.90`")
         return
 
-    memoria_temporaria[chat_id] = dados
-    
-    markup = InlineKeyboardMarkup()
-    markup.row_width = 2
-    botoes = [InlineKeyboardButton(cat, callback_data=cat) for cat in CATEGORIAS]
-    markup.add(*botoes)
-    
-    resumo = (f"📝 **Confirmação:**\n\n🛒 {dados['item']}\n💰 R$ {dados['valor']:.2f}\n"
-              f"💳 {dados['pagamento']}\n📅 {dados['data']}\n\n**Categoria:**")
-    bot.reply_to(message, resumo, reply_markup=markup, parse_mode="Markdown")
+    # Tenta descobrir o valor (assumindo que pode estar no início ou fim)
+    item = ""
+    valor = 0.0
+    categoria = "Outros" # Categoria padrão se não detectar
 
-# --- OUVINTE DOS BOTÕES ---
-
-@bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    chat_id = call.message.chat.id
-    categoria = call.data
-    
-    if chat_id in memoria_temporaria:
-        dados = memoria_temporaria[chat_id]
+    # Lógica simples: Tenta achar o número na mensagem
+    try:
+        # Pega o último elemento como valor (ex: Padaria 20)
+        valor_str = partes[-1].replace(",", ".")
+        valor = float(valor_str)
+        item = " ".join(partes[:-1]) # O resto é o nome
+    except:
         try:
-            planilha = conectar()
-            aba = planilha.worksheet("registros")
-            nova_linha = [
-                dados['data'], dados['item'], dados['valor'], dados['pagamento'],
-                "Telegram", categoria, call.from_user.first_name
-            ]
-            aba.append_row(nova_linha)
-            
-            # Resposta com dica do comando desfazer
-            bot.edit_message_text(
-                f"✅ **Salvo!**\n{dados['item']} (R$ {dados['valor']:.2f})\n\n_Errou? Use /desfazer_", 
-                chat_id, call.message.message_id, parse_mode="Markdown"
-            )
-            del memoria_temporaria[chat_id]
-        except Exception as e:
-            bot.send_message(chat_id, f"❌ Erro: {e}")
-    else:
-        bot.send_message(chat_id, "⚠️ Expirou.")
+            # Tenta pegar o primeiro elemento como valor (ex: 20 Padaria)
+            valor_str = partes[0].replace(",", ".")
+            valor = float(valor_str)
+            item = " ".join(partes[1:])
+        except:
+            bot.reply_to(message, "❌ Não entendi o valor. Use ponto ou vírgula.\nEx: `Almoço 25.50`")
+            return
 
-print("🤖 Bot Financeiro V2.1 (Com Undo) Iniciado!")
+    # Tenta adivinhar categoria (Bem básico, pode melhorar depois com IA ou lista)
+    item_lower = item.lower()
+    if any(x in item_lower for x in ['uber', 'gasolina', 'posto', 'bus']): categoria = "Transporte"
+    elif any(x in item_lower for x in ['mercado', 'padaria', 'ifood', 'lanche', 'pizza']): categoria = "Alimentação"
+    elif any(x in item_lower for x in ['luz', 'internet', 'aluguel', 'condominio']): categoria = "Casa"
+    elif any(x in item_lower for x in ['farmacia', 'medico', 'remedio']): categoria = "Saúde"
+
+    # --- SALVAR NA PLANILHA ---
+    try:
+        planilha = conectar()
+        aba_registros = planilha.worksheet("registros")
+        
+        data_hoje = datetime.now().strftime("%d/%m/%Y")
+        
+        # Colunas: Data, Item, Valor, Categoria, FormaPagto, Usuario
+        aba_registros.append_row([
+            data_hoje,
+            item,
+            valor,
+            categoria,
+            "Bot Telegram", # Forma de pagamento padrão
+            usuario_planilha # O nome que pegamos do mapa (ex: tiagostrey)
+        ])
+        
+        bot.reply_to(message, f"✅ **Lançado!**\nItem: {item}\nValor: R$ {valor:.2f}\nCat: {categoria}\nUsuário: {usuario_planilha}")
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erro ao salvar na planilha: {e}")
+
+# Inicia o Bot
+print("🤖 Bot Financeiro (Multi-usuário) Iniciado!")
 bot.infinity_polling()
