@@ -1,4 +1,5 @@
 import telebot
+from telebot import types # Necessário para os botões
 from conexao import conectar
 import pandas as pd
 from datetime import datetime
@@ -18,7 +19,7 @@ PLANILHA_CACHE = None
 CAT_MAP = {}
 PGTO_MAP = {}
 
-# Dicionários de fallback (Padrão caso a planilha falhe)
+# Dicionários de fallback
 DEFAULT_CAT = {
     'alimentacao': 'Alimentação', 'mercado': 'Alimentação', 'lanche': 'Alimentação',
     'transporte': 'Transporte', 'uber': 'Transporte', 'posto': 'Transporte',
@@ -48,15 +49,10 @@ def obter_planilha():
     return PLANILHA_CACHE
 
 def carregar_dicionarios():
-    """
-    Lê a aba 'config_bot' da planilha para atualizar os sinônimos.
-    """
     global CAT_MAP, PGTO_MAP
-    
     print("📥 Carregando configurações da planilha...")
     p = obter_planilha()
     
-    # Começa com os padrões para garantir funcionamento
     CAT_MAP = DEFAULT_CAT.copy()
     PGTO_MAP = DEFAULT_PGTO.copy()
     
@@ -65,31 +61,22 @@ def carregar_dicionarios():
         return
 
     try:
-        # Tenta ler a aba de configurações
         aba_config = p.worksheet("config_bot")
         dados = aba_config.get_all_records()
-        
         for linha in dados:
             termo = str(linha.get('termo', '')).strip().lower()
             vinculo = str(linha.get('vinculo', '')).strip()
             tipo = str(linha.get('tipo', '')).strip().lower()
-            
             if termo and vinculo:
-                if tipo == 'categoria':
-                    CAT_MAP[termo] = vinculo
-                elif tipo == 'pgto':
-                    PGTO_MAP[termo] = vinculo
-                    
-        print(f"✅ Configurações carregadas! {len(CAT_MAP)} regras de Categoria e {len(PGTO_MAP)} de Pagamento.")
-        
+                if tipo == 'categoria': CAT_MAP[termo] = vinculo
+                elif tipo == 'pgto': PGTO_MAP[termo] = vinculo
+        print(f"✅ Configurações carregadas! {len(CAT_MAP)} regras.")
     except Exception as e:
-        print(f"⚠️ Aba 'config_bot' não encontrada ou erro de leitura: {e}")
-        print("➡️ Mantendo dicionários padrão.")
+        print(f"⚠️ Erro config: {e}. Usando padrões.")
 
 # ==================================================
 # GESTÃO DE USUÁRIO
 # ==================================================
-
 def buscar_usuario_por_telegram(telegram_id):
     p = obter_planilha()
     if not p: return None
@@ -99,13 +86,11 @@ def buscar_usuario_por_telegram(telegram_id):
             if str(u.get('telegram_id', '')).strip() == str(telegram_id):
                 return u['nome']
         return None
-    except Exception as e:
-        print(f"Erro busca: {e}")
-        return None
+    except: return None
 
 def vincular_usuario(telegram_id, nome_informado):
     p = obter_planilha()
-    if not p: return False, "Erro de conexão."
+    if not p: return False, "Erro conexão."
     try:
         aba = p.worksheet("usuarios")
         cell = aba.find(nome_informado)
@@ -117,13 +102,11 @@ def vincular_usuario(telegram_id, nome_informado):
             
         aba.update_cell(cell.row, col_idx, str(telegram_id))
         return True, f"Vínculo realizado! Agora você é **{nome_informado}**."
-    except Exception as e:
-        return False, f"Erro: {e}"
+    except Exception as e: return False, f"Erro: {e}"
 
 # ==================================================
 # SMART PARSER
 # ==================================================
-
 def interpretar_mensagem(texto):
     partes = texto.split()
     valor = 0.0
@@ -133,30 +116,23 @@ def interpretar_mensagem(texto):
 
     for palavra in partes:
         p_lower = palavra.lower()
-        
-        # --- 1. VALOR (Remove do item) ---
         if any(c.isdigit() for c in palavra) and valor == 0.0:
             try:
                 clean = palavra.lower().replace('r$', '').replace(',', '.')
                 valor = float(clean)
-                continue # Pula a palavra (não entra no nome do item)
+                continue
             except: pass
         
-        # --- 2. PAGAMENTO (Remove do item) ---
-        # "Crédito", "Pix", etc. geralmente não fazem parte do nome do produto.
         if p_lower in PGTO_MAP:
             pagamento = PGTO_MAP[p_lower]
-            continue # Pula a palavra
+            continue
         
-        # --- 3. CATEGORIA (MANTÉM no item - Mudança Opção 1) ---
         if p_lower in CAT_MAP:
             categoria = CAT_MAP[p_lower]
-            # REMOVEMOS O 'continue' aqui. 
-            # Assim, "mac" define a categoria Alimentação, mas continua no fluxo para ser adicionado ao nome.
+            # Mantém a palavra no item (Opção 1)
             
         palavras_item.append(palavra)
         
-    # Se, mesmo assim, o item ficou vazio (ex: só mandou valor), define um padrão
     nome_final = " ".join(palavras_item)
     if not nome_final:
         nome_final = categoria if categoria != "Outros" else "Despesa Avulsa"
@@ -164,35 +140,121 @@ def interpretar_mensagem(texto):
     return nome_final, valor, categoria, pagamento
 
 # ==================================================
-# HANDLERS
+# COMANDOS E HANDLERS
 # ==================================================
 
 @bot.message_handler(commands=['refresh', 'atualizar'])
 def atualizar_config(message):
-    """Comando secreto para forçar atualização das categorias sem reiniciar o bot"""
     carregar_dicionarios()
-    bot.reply_to(message, "🔄 Regras de categorias e pagamentos atualizadas da planilha!")
+    bot.reply_to(message, "🔄 Regras atualizadas!")
 
+# --- COMANDO DESFAZER (NOVO v0.03) ---
+@bot.message_handler(commands=['desfazer', 'undo'])
+def comando_desfazer(message):
+    chat_id = message.chat.id
+    usuario = buscar_usuario_por_telegram(chat_id)
+    if not usuario:
+        bot.reply_to(message, "Usuário não identificado.")
+        return
+
+    p = obter_planilha()
+    if not p:
+        bot.reply_to(message, "Erro de conexão.")
+        return
+
+    try:
+        # Busca últimos registros para encontrar o do usuário
+        aba = p.worksheet("registros")
+        # Pega todas as linhas (lista de listas) para ser mais rápido
+        todas_linhas = aba.get_all_values()
+        
+        # Procura de trás para frente
+        linha_alvo = None
+        idx_alvo = -1
+        
+        # Assume que as colunas são fixas, mas vamos tentar achar o index pelo cabeçalho
+        header = todas_linhas[0]
+        try:
+            col_user = header.index("usuario")
+            col_item = header.index("item")
+            col_valor = header.index("valor")
+            col_id = header.index("id_despesa")
+        except:
+            bot.reply_to(message, "Erro: Colunas da planilha mudaram?")
+            return
+
+        # Loop reverso (ignora cabeçalho)
+        for i in range(len(todas_linhas) - 1, 0, -1):
+            row = todas_linhas[i]
+            if len(row) > col_user and row[col_user] == usuario:
+                linha_alvo = row
+                idx_alvo = i # Índice na lista (na planilha é i+1)
+                break
+        
+        if not linha_alvo:
+            bot.reply_to(message, "🤷‍♂️ Não encontrei nenhum lançamento recente seu.")
+            return
+
+        # Prepara dados para confirmação
+        item_nome = linha_alvo[col_item]
+        valor_txt = linha_alvo[col_valor]
+        uuid_reg = linha_alvo[col_id]
+
+        # Cria botões Inline
+        markup = types.InlineKeyboardMarkup()
+        # Passamos o UUID no callback para ter certeza absoluta do que apagar
+        btn_sim = types.InlineKeyboardButton("🗑️ Sim, apagar", callback_data=f"del_{uuid_reg}")
+        btn_nao = types.InlineKeyboardButton("Cancelar", callback_data="cancel_del")
+        markup.add(btn_sim, btn_nao)
+
+        bot.reply_to(message, 
+                     f"⚠️ **Confirmação**\n\nDeseja apagar seu último lançamento?\n\n🛒 **{item_nome}**\n💰 R$ {valor_txt}", 
+                     parse_mode="Markdown", reply_markup=markup)
+
+    except Exception as e:
+        bot.reply_to(message, f"Erro ao buscar: {e}")
+
+# --- CALLBACK DOS BOTÕES (NOVO v0.03) ---
+@bot.callback_query_handler(func=lambda call: True)
+def callback_botoes(call):
+    if call.data == "cancel_del":
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="❌ Operação cancelada.")
+        return
+
+    if call.data.startswith("del_"):
+        uuid_para_apagar = call.data.split("_")[1]
+        
+        p = obter_planilha()
+        try:
+            aba = p.worksheet("registros")
+            # Busca a célula que contém o UUID exato
+            cell = aba.find(uuid_para_apagar)
+            
+            if cell:
+                aba.delete_rows(cell.row)
+                bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="✅ **Apagado!** O registro foi removido da planilha.", parse_mode="Markdown")
+            else:
+                bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="⚠️ Erro: Não encontrei esse registro. Talvez já tenha sido apagado.")
+                
+        except Exception as e:
+            bot.answer_callback_query(call.id, "Erro ao apagar.")
+
+# --- PROCESSADOR DE MENSAGENS ---
 @bot.message_handler(func=lambda m: True)
 def processar(message):
     chat_id = message.chat.id
     texto = message.text.strip()
     
-    print(f"📩 Msg {chat_id}: {texto}")
-    
     usuario = buscar_usuario_por_telegram(chat_id)
     
-    # --- CADASTRO ---
     if not usuario:
         if len(texto.split()) > 1 or any(c.isdigit() for c in texto):
-            bot.reply_to(message, "⛔ É novo por aqui?\nPor favor, informe o nome de usuário cadastrado no App 'Controle Financeiro' para eu vincular a tua conta.")
+            bot.reply_to(message, "⛔ É novo por aqui?\nInforme seu usuário do App.")
             return
-        
         ok, msg = vincular_usuario(chat_id, texto)
         bot.reply_to(message, msg)
         return
 
-    # --- DESPESA ---
     item, valor, categoria, pgto = interpretar_mensagem(texto)
     
     if valor <= 0:
@@ -203,19 +265,29 @@ def processar(message):
         p = obter_planilha()
         novo_id = str(uuid.uuid4())
         
+        # V0.03 - Padrão US/UK (Envia float puro)
         p.worksheet("registros").append_row([
             novo_id,
             datetime.now().strftime("%d/%m/%Y"),
             item,
-            valor,
+            valor, 
             pgto,
             "Bot Telegram",
             categoria,
             usuario
         ])
-        bot.reply_to(message, f"✅ **Lançado!**\nItem: {item}\nValor: R$ {valor:.2f}\nCat: {categoria}\nPgto: {pgto}")
+        
+        # Mensagem com link para desfazer
+        msg_sucesso = (f"✅ **Lançado!**\n"
+                       f"Item: {item}\n"
+                       f"Valor: R$ {valor:.2f}\n"
+                       f"Cat: {categoria}\n"
+                       f"Pgto: {pgto}\n\n"
+                       f"↩️ _Errou?_ /desfazer")
+                       
+        bot.reply_to(message, msg_sucesso, parse_mode="Markdown")
+        
     except Exception as e:
-        # Se der erro de conexão, limpa cache para reconectar na próxima
         global PLANILHA_CACHE
         PLANILHA_CACHE = None
         bot.reply_to(message, f"Erro ao salvar: {e}")
@@ -223,7 +295,7 @@ def processar(message):
 # ==================================================
 # INICIALIZAÇÃO
 # ==================================================
-print("🤖 Iniciando Bot...")
-carregar_dicionarios() # Carrega regras ao iniciar
+print("🤖 Iniciando Bot v0.03...")
+carregar_dicionarios()
 print("🤖 Bot Rodando!")
 bot.infinity_polling()
