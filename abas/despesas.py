@@ -39,6 +39,24 @@ def render():
     except Exception as e:
         st.error(f"Erro ao carregar: {e}")
 
+    # --- FUNÇÃO DE NORMALIZAÇÃO (V0.02) ---
+    def normalizar_valor(v):
+        """
+        Converte qualquer entrada (texto ou número) para float padrão Python.
+        Compatível com Google Sheets configurado para Reino Unido/EUA.
+        """
+        if isinstance(v, (int, float)):
+            return float(v)
+        
+        # Se for texto, remove símbolos de moeda e separadores de milhar (vírgula)
+        s = str(v).replace("R$", "").replace("£", "").strip()
+        s = s.replace(",", "") # Remove vírgula de milhar (Ex: 1,200.50 -> 1200.50)
+        # O ponto (.) é mantido pois é o separador decimal correto
+        try: 
+            return float(s)
+        except: 
+            return 0.0
+
     # --- VISUALIZAÇÃO ---
     if not df_user.empty:
         c1, c2 = st.columns([2,1])
@@ -53,14 +71,13 @@ def render():
         if f_mes != "Todos": df_f = df_f[df_f["mes"] == f_mes]
         
         if not df_f.empty:
-            # Tratamento de valor para soma
-            def clean(v):
-                s = str(v).replace("R$", "").strip()
-                if "," in s: s = s.replace(".", "").replace(",", ".")
-                try: return float(s)
-                except: return 0.0
+            # Aplica normalização na coluna de valor para cálculos e exibição
+            # Cria coluna 'v' (float puro) para contas
+            df_f["v"] = df_f["valor"].apply(normalizar_valor)
             
-            df_f["v"] = df_f["valor"].apply(clean)
+            # Atualiza a coluna original 'valor' com o número limpo para exibir na tabela sem lixo de texto
+            df_f["valor"] = df_f["v"] 
+
             st.metric("Total Gasto", formatar_real(df_f["v"].sum()))
             
             # Gráficos
@@ -75,9 +92,14 @@ def render():
                 st.altair_chart(base.mark_arc(innerRadius=70, outerRadius=90), use_container_width=True)
             
             with g2:
-                # Mostra tabela (selecionamos colunas úteis para leitura)
+                # Mostra tabela
                 cols_view = [c for c in ["data", "item", "valor", "categoria", "forma_pagamento"] if c in df_f.columns]
-                st.dataframe(df_f[cols_view].style.format({"valor": "R$ {}"}), use_container_width=True, hide_index=True)
+                # Aqui usamos {:.2f} para forçar duas casas decimais (30.1 vira 30.10)
+                st.dataframe(
+                    df_f[cols_view].style.format({"valor": "R$ {:.2f}"}), 
+                    use_container_width=True, 
+                    hide_index=True
+                )
 
             st.divider()
 
@@ -85,13 +107,12 @@ def render():
             # GERENCIAR LANÇAMENTOS (EDITAR/EXCLUIR)
             # ==============================================================================
             with st.expander("📝 Gerenciar Lançamentos", expanded=False):
-                # Cria dicionário para o selectbox: ID -> Texto Amigável
                 opcoes_despesas = {}
                 for idx, r in df_f.iterrows():
-                    # Usa o id_despesa da planilha se existir
                     item_id = str(r.get('id_despesa', ''))
                     if item_id:
-                        opcoes_despesas[item_id] = f"{r['data']} - {r['item']} ({formatar_real(r['v'])})"
+                        # Usa formatar_real ou formatação direta
+                        opcoes_despesas[item_id] = f"{r['data']} - {r['item']} (R$ {r['v']:.2f})"
                 
                 sel_id = st.selectbox("Selecione o gasto:", ["Selecione..."] + list(opcoes_despesas.keys()), format_func=lambda x: opcoes_despesas.get(x, "Selecione..."))
 
@@ -110,9 +131,9 @@ def render():
                         if st.button("Sim, excluir", type="primary", key="btn_del_desp"):
                             if sel_id != "Selecione...":
                                 try:
-                                    # Filtra removendo o ID selecionado da tabela COMPLETA
                                     df_nova = df_full[df_full['id_despesa'].astype(str) != sel_id]
                                     aba_reg.clear()
+                                    # Atualiza mantendo compatibilidade
                                     aba_reg.update([df_nova.columns.values.tolist()] + df_nova.astype(str).values.tolist())
                                     st.success("Excluído!"); time.sleep(1); st.rerun()
                                 except Exception as ex: st.error(f"Erro: {ex}")
@@ -121,12 +142,10 @@ def render():
                 if st.session_state.get('editando_desp_id') == sel_id and sel_id != "Selecione...":
                     st.divider()
                     try:
-                        # Busca dados originais na tabela completa usando o ID
                         item_dados = df_full[df_full['id_despesa'].astype(str) == sel_id].iloc[0]
                         st.markdown(f"**Editando:** {item_dados['item']}")
                         
                         with st.form("form_edit_despesa"):
-                            # Layout de 3 Colunas para caber a Forma de Pagamento
                             ce1, ce2, ce3 = st.columns(3)
                             
                             with ce1:
@@ -136,42 +155,34 @@ def render():
                                 en_data = st.date_input("Data", value=d_obj, format="DD/MM/YYYY")
                             
                             with ce2:
-                                # Trata valor
-                                try: val_ini = float(str(item_dados['valor']).replace("R$", "").replace(".", "").replace(",", "."))
-                                except: val_ini = 0.0
-                                en_valor = st.number_input("Valor", value=val_ini, step=10.0)
+                                # Usa a nova função normalizar_valor para preencher o campo corretamente
+                                val_ini = normalizar_valor(item_dados['valor'])
+                                en_valor = st.number_input("Valor", value=val_ini, step=10.0, format="%.2f")
                                 
-                                # Lista de Categorias
                                 lista_cat = ["Alimentação", "Transporte", "Casa", "Lazer", "Saúde", "Educação", "Outros"]
                                 cat_atual = item_dados.get('categoria', 'Outros')
                                 idx_cat = lista_cat.index(cat_atual) if cat_atual in lista_cat else 6
                                 en_cat = st.selectbox("Categoria", lista_cat, index=idx_cat)
 
                             with ce3:
-                                # Forma de Pagamento (Novo Campo)
                                 lista_pgto = ["Crédito", "Débito", "Pix", "Dinheiro", "Outros"]
                                 pgto_atual = item_dados.get('forma_pagamento', 'Outros')
-                                # Tenta achar o index, se não achar, usa 'Outros'
                                 idx_pgto = lista_pgto.index(pgto_atual) if pgto_atual in lista_pgto else 4
                                 en_pgto = st.selectbox("Forma Pagto", lista_pgto, index=idx_pgto)
                             
-                            # Botões
                             c_btn1, c_save, c_canc, c_btn2 = st.columns(4)
                             with c_save: submit = st.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
                             with c_canc: cancel = st.form_submit_button("Cancelar", use_container_width=True)
 
                             if submit:
-                                # Atualiza no DataFrame Geral
                                 idx_geral = df_full[df_full['id_despesa'].astype(str) == sel_id].index[0]
                                 df_full.at[idx_geral, 'item'] = en_item
                                 df_full.at[idx_geral, 'data'] = en_data.strftime("%d/%m/%Y")
-                                df_full.at[idx_geral, 'valor'] = en_valor
+                                df_full.at[idx_geral, 'valor'] = en_valor # Salva como float puro
                                 df_full.at[idx_geral, 'categoria'] = en_cat
                                 df_full.at[idx_geral, 'forma_pagamento'] = en_pgto
                                 
-                                # Salva na Planilha
                                 aba_reg.clear()
-                                # Converte para string para evitar erros de JSON na API do Google
                                 aba_reg.update([df_full.columns.values.tolist()] + df_full.astype(str).values.tolist())
                                 
                                 st.success("Salvo!")
