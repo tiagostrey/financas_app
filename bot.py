@@ -3,13 +3,12 @@ from conexao import conectar
 import pandas as pd
 from datetime import datetime
 import uuid # Necessário para gerar o ID
+from segredos import TELEGRAM_TOKEN
 
 # ==================================================
 # CONFIGURAÇÕES
 # ==================================================
-TOKEN = "8468850047:AAHNhy7O9XzODin2biNV1DGeUrEBZw982OM"
-
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # Listas de palavras-chave (Smart Parser)
 CAT_MAP = {
