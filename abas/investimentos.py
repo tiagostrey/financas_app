@@ -177,7 +177,8 @@ def render(selic_atual, cdi_estimado, ipca_estimado):
         opcoes_investimentos = {}
         if res:
             for r in res:
-                opcoes_investimentos[r['ID_OCULTO']] = f"{r['Nome']} - {r['Data']}"
+                # CORREÇÃO APLICADA: Nome - Data (Valor Formatado)
+                opcoes_investimentos[r['ID_OCULTO']] = f"{r['Nome']} - {r['Data']} ({formatar_real(r['Valor Investido'])})"
         
         inv_selecionado_id = st.selectbox("Selecione:", options=["Selecione..."] + list(opcoes_investimentos.keys()), format_func=lambda x: opcoes_investimentos.get(x, "Selecione..."))
         
@@ -246,7 +247,9 @@ def render(selic_atual, cdi_estimado, ipca_estimado):
 
                     c_v1, c_save, c_canc, c_v2 = st.columns(4)
                     with c_save: salvar_ed = st.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
-                    with c_canc: cancel_ed = st.form_submit_button("Cancelar", use_container_width=True)
+                    with c_canc: 
+                        cancel_ed = st.form_submit_button("Cancelar", use_container_width=True, 
+                            on_click=lambda: st.session_state.update({'editando_id': None}))
 
                     if salvar_ed:
                         try:
@@ -269,7 +272,7 @@ def render(selic_atual, cdi_estimado, ipca_estimado):
                             st.success("Atualizado!"); st.session_state['editando_id'] = None; time.sleep(1); st.rerun()
                         except Exception as ex: st.error(f"Erro: {ex}")
                     
-                    if cancel_ed: st.session_state['editando_id'] = None; st.rerun()
+                    if cancel_ed: st.rerun()
 
             except Exception as e: st.error(f"Erro na edição: {e}")
 
