@@ -201,7 +201,7 @@ def render():
                 except Exception as e: st.error(f"Erro edição: {e}")
 
     # ==============================================================================
-    # 4. TUTORIAL: COMO USAR O BOT (Rodapé Atualizado v0.06)
+    # 4. TUTORIAL: COMO USAR O BOT (Rodapé Atualizado v0.08)
     # ==============================================================================
     with st.expander("🤖 Como ativar e usar o Bot do Telegram"):
         c_texto, c_info = st.columns([2, 1])
@@ -219,6 +219,8 @@ def render():
 
         with c_info:
             usuario_logado = st.session_state.get('usuario_atual', 'Desconhecido')
+            
+            # Voltamos ao padrão st.info (Nativo)
             st.info(f"👤 Seu usuário é:\n\n**{usuario_logado}**")
             
             # Link oficial do novo bot
