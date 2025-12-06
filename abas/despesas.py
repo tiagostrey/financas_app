@@ -14,13 +14,12 @@ def render():
         if st.button("🔄 Atualizar", key="btn_ext_up"): st.cache_data.clear(); st.rerun()
     
     # ==============================================================================
-    # 0. CARGA DE DADOS E FUNÇÕES (Lógica invisível)
+    # 0. CARGA DE DADOS E FUNÇÕES
     # ==============================================================================
     df_full = pd.DataFrame()
     df_user = pd.DataFrame()
-    df_f = pd.DataFrame() # Dataframe filtrado
+    df_f = pd.DataFrame()
     
-    # Função de Normalização (Mantida v0.02)
     def normalizar_valor(v):
         if isinstance(v, (int, float)): return float(v)
         s = str(v).replace("R$", "").replace("£", "").strip()
@@ -43,29 +42,23 @@ def render():
     # 1. DADOS LANÇADOS (Visualização)
     # ==============================================================================
     if not df_user.empty:
-        # Prepara filtros e dados
         df_user["dt"] = pd.to_datetime(df_user["data"], format="%d/%m/%Y", errors="coerce")
         df_user["mes"] = df_user["dt"].dt.strftime("%m/%Y")
         meses = sorted(df_user["mes"].dropna().unique().tolist(), reverse=True)
         
-        # Filtro de Mês no topo da visualização
         c_filtro, c_vazio = st.columns([1, 2])
         with c_filtro:
             f_mes = st.selectbox("Mês", ["Todos"] + meses, key="fil_mes")
         
-        # Aplica Filtro
         df_f = df_user.copy()
         if f_mes != "Todos": df_f = df_f[df_f["mes"] == f_mes]
         
         if not df_f.empty:
-            # Normaliza valores
             df_f["v"] = df_f["valor"].apply(normalizar_valor)
             df_f["valor"] = df_f["v"] 
 
-            # KPI Principal
             st.metric("Total Gasto", formatar_real(df_f["v"].sum()))
             
-            # Gráficos e Tabela
             g1, g2 = st.columns([1, 2])
             with g1:
                 cat_s = df_f.groupby("categoria")["v"].sum().reset_index().sort_values("v", ascending=False)
@@ -97,7 +90,8 @@ def render():
             c_input1, c_input2, c_input3 = st.columns(3)
             with c_input1:
                 novo_item = st.text_input("Descrição", placeholder="Ex: Mercado")
-                nova_data = st.date_input("Data", value=datetime.now())
+                # CORREÇÃO: Adicionado format="DD/MM/YYYY"
+                nova_data = st.date_input("Data", value=datetime.now(), format="DD/MM/YYYY")
             with c_input2:
                 novo_valor = st.number_input("Valor (R$)", min_value=0.0, step=10.0, format="%.2f")
                 nova_cat = st.selectbox("Categoria", ["Alimentação", "Transporte", "Casa", "Lazer", "Saúde", "Educação", "Outros"])
@@ -115,7 +109,7 @@ def render():
                                 novo_id,
                                 nova_data.strftime("%d/%m/%Y"),
                                 novo_item,
-                                novo_valor, # Float puro (UK)
+                                novo_valor,
                                 novo_pgto,
                                 "Web App",
                                 nova_cat,
@@ -129,14 +123,12 @@ def render():
     # ==============================================================================
     # 3. GERENCIAR LANÇAMENTOS (Editar/Excluir)
     # ==============================================================================
-    # Só exibe se houver dados filtrados para gerenciar
     if not df_f.empty:
         with st.expander("📝 Gerenciar Lançamentos (Editar / Excluir)", expanded=False):
             opcoes_despesas = {}
             for idx, r in df_f.iterrows():
                 item_id = str(r.get('id_despesa', ''))
                 if item_id:
-                    # Formatação segura
                     opcoes_despesas[item_id] = f"{r['data']} - {r['item']} (R$ {r['v']:.2f})"
             
             sel_id = st.selectbox("Selecione o gasto:", ["Selecione..."] + list(opcoes_despesas.keys()), format_func=lambda x: opcoes_despesas.get(x, "Selecione..."))
@@ -185,9 +177,13 @@ def render():
                             pgto_atual = item_dados.get('forma_pagamento', 'Outros')
                             en_pgto = st.selectbox("Pagto", lista_pgto, index=lista_pgto.index(pgto_atual) if pgto_atual in lista_pgto else 4)
                         
-                        c_save, c_canc = st.columns(2)
-                        with c_save: 
-                            if st.form_submit_button("💾 Atualizar"):
+                        st.divider()
+                        
+                        # --- BOTÕES REPOSICIONADOS (Layout 4 Colunas) ---
+                        c_vazia1, c_salvar, c_cancelar, c_vazia2 = st.columns(4)
+                        
+                        with c_salvar: 
+                            if st.form_submit_button("💾 Salvar", type="primary", use_container_width=True):
                                 idx_geral = df_full[df_full['id_despesa'].astype(str) == sel_id].index[0]
                                 df_full.at[idx_geral, 'item'] = en_item
                                 df_full.at[idx_geral, 'data'] = en_data.strftime("%d/%m/%Y")
@@ -199,13 +195,15 @@ def render():
                                 aba_reg.update([df_full.columns.values.tolist()] + df_full.astype(str).values.tolist())
                                 st.session_state['editando_desp_id'] = None
                                 st.success("Salvo!"); time.sleep(1); st.rerun()
-                        with c_canc: 
-                            if st.form_submit_button("Cancelar"):
+                        
+                        with c_cancelar: 
+                            if st.form_submit_button("Cancelar", use_container_width=True):
                                 st.session_state['editando_desp_id'] = None; st.rerun()
+
                 except Exception as e: st.error(f"Erro edição: {e}")
 
     # ==============================================================================
-    # 4. TUTORIAL BOT TELEGRAM (Rodapé)
+    # 4. TUTORIAL BOT TELEGRAM
     # ==============================================================================
     with st.expander("🤖 Tutorial: Bot do Telegram"):
         st.markdown("""
