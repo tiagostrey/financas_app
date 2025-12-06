@@ -90,7 +90,6 @@ def render():
             c_input1, c_input2, c_input3 = st.columns(3)
             with c_input1:
                 novo_item = st.text_input("Descrição", placeholder="Ex: Mercado")
-                # CORREÇÃO: Adicionado format="DD/MM/YYYY"
                 nova_data = st.date_input("Data", value=datetime.now(), format="DD/MM/YYYY")
             with c_input2:
                 novo_valor = st.number_input("Valor (R$)", min_value=0.0, step=10.0, format="%.2f")
@@ -179,7 +178,6 @@ def render():
                         
                         st.divider()
                         
-                        # --- BOTÕES REPOSICIONADOS (Layout 4 Colunas) ---
                         c_vazia1, c_salvar, c_cancelar, c_vazia2 = st.columns(4)
                         
                         with c_salvar: 
@@ -203,12 +201,25 @@ def render():
                 except Exception as e: st.error(f"Erro edição: {e}")
 
     # ==============================================================================
-    # 4. TUTORIAL BOT TELEGRAM
+    # 4. TUTORIAL: COMO USAR O BOT (Rodapé Atualizado v0.06)
     # ==============================================================================
-    with st.expander("🤖 Tutorial: Bot do Telegram"):
-        st.markdown("""
-        1. Abra o Telegram e busque por **@BotFather**.
-        2. Envie `/newbot` e siga as instruções.
-        3. Copie o TOKEN e envie ao administrador.
-        4. Busque seu ID no **@userinfobot**.
-        """)
+    with st.expander("🤖 Como ativar e usar o Bot do Telegram"):
+        c_texto, c_info = st.columns([2, 1])
+        
+        with c_texto:
+            st.markdown("""
+            **Passo 1 - Inicie a conversa:** Clique no link ao lado para abrir o **Controle Financeiro Bot** no Telegram e envie um **"Oi"**.
+            
+            **Passo 2 - Identifique-se:** O Bot vai avisar que não te conhece e pedirá seu nome de usuário.
+            
+            **Passo 3 - Digite seu usuário:** Responda para o bot exatamente o nome que aparece na caixa azul ao lado (copie e cole para garantir).
+            
+            **Passo 4 - Pronto!** O Bot confirmará o vínculo. A partir daí, é só mandar os gastos (ex: `50 padaria crédito`).
+            """)
+
+        with c_info:
+            usuario_logado = st.session_state.get('usuario_atual', 'Desconhecido')
+            st.info(f"👤 Seu usuário é:\n\n**{usuario_logado}**")
+            
+            # Link oficial do novo bot
+            st.link_button("💬 Abrir Bot no Telegram", "https://t.me/GranaSegura_Bot", use_container_width=True)
