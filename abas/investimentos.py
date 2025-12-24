@@ -294,7 +294,8 @@ def render(selic_atual, cdi_estimado, ipca_estimado):
                     p = conectar()
                     p.worksheet("historico_selic").append_row([data_selic.strftime("%d/%m/%Y"), taxa_selic_hist])
                     st.success("Salvo!"); st.cache_data.clear(); st.rerun()
-                except: st.error("Erro.")
+                except Exception as e:
+                    st.error("Erro ao salvar: {e}")
         with c_h2:
             if not df_hist.empty:
                 df_hist['Data'] = df_hist['data_inicio'].dt.strftime("%d/%m/%Y")
